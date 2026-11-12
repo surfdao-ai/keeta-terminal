@@ -4,7 +4,8 @@
 set -uo pipefail
 BASE="${1:-https://my-test-app-omega-nine.vercel.app}"
 JAR="$(mktemp -d)/cookies.txt"
-PASS='smoke-test-passphrase-01'
+# Passphrase of the wallet in the store. Set SMOKE_PASS for a different one.
+PASS="${SMOKE_PASS:-skills-verify-passphrase-01}"
 fails=0
 
 check() { # check <label> <expected> <actual>
@@ -26,7 +27,8 @@ check "GET /api/state" 200 "$(code $BASE/api/state)"
 check "GET /api/chats" 200 "$(code $BASE/api/chats)"
 check "GET /api/automations" 200 "$(code $BASE/api/automations)"
 check "GET /api/automations/wallet" 200 "$(code $BASE/api/automations/wallet)"
-check "GET /api/settings (no session -> 401)" 401 "$(code $BASE/api/settings)"
+check "GET /api/settings (public cap read)" 200 "$(code $BASE/api/settings)"
+check "POST /api/settings (no session -> 401)" 401 "$(code -X POST $BASE/api/settings -H 'content-type: application/json' -d '{"dailyCapUsd":50}')"
 check "GET /api/models (bad body -> 400)" 400 "$(code -X POST $BASE/api/models -H 'content-type: application/json' -d '{}')"
 check "GET /api/models (private url -> 400)" 400 "$(code -X POST $BASE/api/models -H 'content-type: application/json' -d '{"baseUrl":"http://169.254.169.254/"}')"
 
