@@ -309,6 +309,11 @@ export async function dbWrite(key: string, value: unknown): Promise<void> {
  * read-modify-write is retried against the fresh value — so a concurrent
  * update is never silently lost.
  *
+ * Each round only one writer can win (the losers' revision is stale), so the
+ * budget has to cover the number of writers that overlap. Fifteen attempts
+ * with exponential backoff and jitter covers a burst of a dozen writers while
+ * still failing loudly rather than clobbering data.
+ *
  * `mutate` may run more than once and must therefore be side-effect free.
  */
 export async function dbUpdate<T>(
@@ -316,7 +321,7 @@ export async function dbUpdate<T>(
   mutate: (current: T | null) => T | Promise<T>,
   opts?: { attempts?: number },
 ): Promise<T> {
-  const attempts = opts?.attempts ?? 6;
+  const attempts = opts?.attempts ?? 15;
   const db = await backend();
 
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -328,7 +333,8 @@ export async function dbUpdate<T>(
     } catch (e) {
       if (!(e instanceof StoreConflictError)) throw e;
       // Someone else wrote first — back off and retry against their value.
-      await new Promise((r) => setTimeout(r, 25 * (attempt + 1) + Math.random() * 30));
+      const backoff = Math.min(20 * (attempt + 1), 300) * (0.5 + Math.random());
+      await new Promise((r) => setTimeout(r, backoff));
     }
   }
   throw new Error(`Could not update "${key}" after ${attempts} attempts (concurrent writes).`);
