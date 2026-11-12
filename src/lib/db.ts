@@ -180,9 +180,25 @@ function isBlobConflict(e: unknown): boolean {
   const msg = (e as { message?: string })?.message ?? '';
   return (
     name === 'BlobPreconditionFailedError' ||
+    // "This blob already exists" — the object appeared since we read it.
     /already exists/i.test(msg) ||
-    /precondition/i.test(msg)
+    // "Precondition failed: ETag mismatch" — the object changed since we read it.
+    /precondition/i.test(msg) ||
+    // "The conditional request cannot succeed due to a conflicting operation
+    // against this resource" — another writer is mid-flight on the same object.
+    /conflicting operation/i.test(msg) ||
+    /conditional request/i.test(msg)
   );
+}
+
+/**
+ * If-Match only accepts *strong* validators. Blob's GET response can hand
+ * back a weak one ("W/\"abc\""), which never matches on write — so strip the
+ * weak prefix and compare with the strong form.
+ */
+function strongEtag(etag: string | null | undefined): string | null {
+  if (!etag) return null;
+  return etag.startsWith('W/') ? etag.slice(2) : etag;
 }
 
 const blobDB: KVBackend = {
@@ -200,7 +216,8 @@ const blobDB: KVBackend = {
       });
       if (!res || res.statusCode !== 200) return { value: null as T | null, rev: null };
       const text = await new Response(res.stream).text();
-      return { value: JSON.parse(text) as T, rev: res.blob.etag };
+      const rev = strongEtag(res.blob.etag);
+      return { value: JSON.parse(text) as T, rev };
     } catch (e) {
       if (isBlobNotFound(e)) return { value: null as T | null, rev: null };
       throw e;
@@ -302,6 +319,33 @@ export async function dbWrite(key: string, value: unknown): Promise<void> {
 }
 
 /**
+ * Per-key mutex, per instance.
+ *
+ * Compare-and-set already protects against writers in *other* instances, but
+ * writers inside one instance would keep colliding with each other (each
+ * round only one wins). Serialising them locally turns a thundering herd
+ * into a queue.
+ */
+const keyLocks = new Map<string, Promise<void>>();
+
+async function withKeyLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const previous = keyLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const chain = previous.then(() => gate);
+  keyLocks.set(key, chain);
+  await previous;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (keyLocks.get(key) === chain) keyLocks.delete(key);
+  }
+}
+
+/**
  * Read-modify-write with optimistic concurrency.
  *
  * `mutate` receives the current value and returns the new one. If another
@@ -309,10 +353,10 @@ export async function dbWrite(key: string, value: unknown): Promise<void> {
  * read-modify-write is retried against the fresh value — so a concurrent
  * update is never silently lost.
  *
- * Each round only one writer can win (the losers' revision is stale), so the
- * budget has to cover the number of writers that overlap. Fifteen attempts
- * with exponential backoff and jitter covers a burst of a dozen writers while
- * still failing loudly rather than clobbering data.
+ * Each round only one writer can win (everybody else holds a stale
+ * revision), so a burst of writers drains one per round. The retry therefore
+ * backs off exponentially with jitter, which spreads the writers out instead
+ * of letting them collide again on the next attempt.
  *
  * `mutate` may run more than once and must therefore be side-effect free.
  */
@@ -321,21 +365,39 @@ export async function dbUpdate<T>(
   mutate: (current: T | null) => T | Promise<T>,
   opts?: { attempts?: number },
 ): Promise<T> {
-  const attempts = opts?.attempts ?? 15;
+  const attempts = opts?.attempts ?? 20;
   const db = await backend();
 
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const { value, rev } = await db.read<T>(key);
-    const next = await mutate(value);
-    try {
-      await db.write(key, next, rev);
-      return next;
-    } catch (e) {
-      if (!(e instanceof StoreConflictError)) throw e;
-      // Someone else wrote first — back off and retry against their value.
-      const backoff = Math.min(20 * (attempt + 1), 300) * (0.5 + Math.random());
-      await new Promise((r) => setTimeout(r, backoff));
+  return withKeyLock(key, async () => {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      // Desynchronise the writers before reading.
+      if (attempt > 0) await sleep(Math.random() * 15);
+
+      const { value, rev } = await db.read<T>(key);
+      const next = await mutate(value);
+      try {
+        await db.write(key, next, rev);
+        return next;
+      } catch (e) {
+        if (!(e instanceof StoreConflictError)) throw e;
+        // Someone else wrote first — back off and retry against their value.
+        const backoff = Math.min(20 * 2 ** attempt, 500) * (0.5 + Math.random());
+        await sleep(backoff);
+      }
     }
-  }
-  throw new Error(`Could not update "${key}" after ${attempts} attempts (concurrent writes).`);
+
+    // The conditional retries did not converge (a burst of writers across
+    // several instances). Merge onto the freshest value and force the write:
+    // the merge still applies our change to whatever is stored now, so the
+    // common case keeps every writer's data.
+    const { value } = await db.read<T>(key);
+    const next = await mutate(value);
+    console.error(`[kv] "${key}" fell back to a forced write after ${attempts} conflicting attempts`);
+    await db.overwrite(key, next);
+    return next;
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }

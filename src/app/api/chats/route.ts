@@ -22,26 +22,34 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as {
-    id?: string;
-    title?: string;
-    messages?: UIMessage[];
-  };
+  try {
+    const body = (await req.json()) as {
+      id?: string;
+      title?: string;
+      messages?: UIMessage[];
+    };
 
-  const messages = Array.isArray(body.messages) ? body.messages : [];
-  const existing = body.id ? await getChat(body.id) : null;
-  const id = existing?.id ?? body.id ?? crypto.randomUUID();
-  const now = new Date().toISOString();
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    const existing = body.id ? await getChat(body.id) : null;
+    const id = existing?.id ?? body.id ?? crypto.randomUUID();
+    const now = new Date().toISOString();
 
-  const chat = await saveChat({
-    id,
-    title: body.title?.trim() || existing?.title || deriveTitle(messages),
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-    messages,
-  });
+    const chat = await saveChat({
+      id,
+      title: body.title?.trim() || existing?.title || deriveTitle(messages),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      messages,
+    });
 
-  return NextResponse.json({ ok: true, chat: { id: chat.id, title: chat.title, updatedAt: chat.updatedAt } });
+    return NextResponse.json({ ok: true, chat: { id: chat.id, title: chat.title, updatedAt: chat.updatedAt } });
+  } catch (e) {
+    console.error('save chat failed:', e);
+    return NextResponse.json(
+      { error: `Could not save the chat: ${(e as Error).message}` },
+      { status: 500 },
+    );
+  }
 }
 
 export async function DELETE(req: Request) {
