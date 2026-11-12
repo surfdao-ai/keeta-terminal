@@ -4,10 +4,12 @@ import { useEffect, useState } from 'react';
 import {
   createVault,
   openVault,
-  passkeySupported,
+  prfSupport,
+  PrfUnsupportedError,
   readVault,
   writeVault,
   clearVault,
+  type PrfSupport,
   type VaultRecord,
 } from '@/lib/vault';
 import { generateSeedOnDevice, addressFromSeedOnDevice } from '@/lib/keeta/device';
@@ -31,7 +33,8 @@ type Step = 'idle' | 'show-seed' | 'seal' | 'import';
  */
 export default function WalletPanel({ address, seed, onSeed, onRegistered }: WalletPanelProps) {
   const [vault, setVault] = useState<VaultRecord | null>(null);
-  const [canPasskey, setCanPasskey] = useState(false);
+  const [prf, setPrf] = useState<PrfSupport>('unknown');
+  const [sealMode, setSealMode] = useState<'passkey' | 'passphrase'>('passphrase');
   const [step, setStep] = useState<Step>('idle');
   const [newSeed, setNewSeed] = useState('');
   const [pendingAddress, setPendingAddress] = useState('');
@@ -45,10 +48,13 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
     let alive = true;
     void (async () => {
       const rec = readVault();
-      const supported = await passkeySupported();
+      const support = await prfSupport();
       if (!alive) return;
       setVault(rec);
-      setCanPasskey(supported);
+      setPrf(support);
+      // Only default to the passkey when the browser says PRF works. Where it
+      // is unknown (Safari) the passphrase is the safe default.
+      setSealMode(support === 'yes' ? 'passkey' : 'passphrase');
     })();
     return () => {
       alive = false;
@@ -110,8 +116,8 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
       const rec = await createVault({
         seed: newSeed,
         address: pendingAddress,
-        mode: canPasskey ? 'passkey' : 'passphrase',
-        passphrase: canPasskey ? undefined : passphrase,
+        mode: sealMode,
+        passphrase: sealMode === 'passphrase' ? passphrase : undefined,
       });
       writeVault(rec);
       setVault(rec);
@@ -121,12 +127,20 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
       setPassphrase('');
       setStep('idle');
       setMsg(
-        canPasskey
+        sealMode === 'passkey'
           ? 'sealed with your passkey — unlock with Face ID next time'
           : 'sealed with your passphrase — unlock with it next time',
       );
     } catch (e) {
-      setErr((e as Error).message);
+      if (e instanceof PrfUnsupportedError) {
+        setSealMode('passphrase');
+        setErr(
+          'This device cannot protect the seed with a passkey, so use a passphrase instead. ' +
+            'Your written-down seed remains the recovery copy.',
+        );
+      } else {
+        setErr((e as Error).message);
+      }
     } finally {
       setBusy(false);
     }
@@ -180,7 +194,14 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
       onSeed(unlocked);
       setMsg('unlocked');
     } catch (e) {
-      setErr((e as Error).message);
+      if (e instanceof PrfUnsupportedError) {
+        setErr(
+          'This device cannot open a passkey vault. Restore the wallet from your written-down seed ' +
+            '(Import an existing wallet) and seal it with a passphrase.',
+        );
+      } else {
+        setErr((e as Error).message);
+      }
     } finally {
       setBusy(false);
     }
@@ -329,33 +350,59 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
       {step === 'seal' && (
         <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
           <div className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Seal on this device</div>
-          {canPasskey ? (
+
+          <div className="flex gap-1 text-xs mb-3">
+            <button
+              type="button"
+              onClick={() => setSealMode('passphrase')}
+              className={`flex-1 py-1.5 rounded ${
+                sealMode === 'passphrase' ? 'bg-[#4C1D95] text-white' : 'bg-zinc-800 text-zinc-400'
+              }`}
+            >
+              Passphrase
+            </button>
+            <button
+              type="button"
+              onClick={() => setSealMode('passkey')}
+              disabled={prf === 'no'}
+              className={`flex-1 py-1.5 rounded disabled:opacity-40 ${
+                sealMode === 'passkey' ? 'bg-[#4C1D95] text-white' : 'bg-zinc-800 text-zinc-400'
+              }`}
+            >
+              Passkey (Face ID){prf === 'no' ? ' — unsupported here' : ''}
+            </button>
+          </div>
+
+          {sealMode === 'passkey' ? (
             <p className="text-xs text-zinc-500 mb-3">
               A passkey protects the seed on this device. Unlocking is a Face ID / Touch ID tap — you
               never type the seed again.
+              {prf === 'unknown' && ' If this device cannot derive a key from a passkey, switch to the passphrase.'}
             </p>
           ) : (
             <>
               <p className="text-xs text-zinc-500 mb-3">
-                This device cannot derive a key from a passkey, so the seed is sealed with a
-                passphrase. Your written-down seed stays the recovery copy.
+                The seed is sealed with a passphrase on this device. It is not your seed — it only
+                unlocks the copy stored here. Your written-down seed stays the recovery copy.
               </p>
               <input
                 type="password"
                 value={passphrase}
                 onChange={(e) => setPassphrase(e.target.value)}
                 placeholder="choose a vault passphrase"
+                autoComplete="new-password"
                 className="px-3 py-2.5 w-full rounded-lg bg-[#09090B] border border-zinc-700 text-sm focus:outline-none focus:border-purple-600"
               />
             </>
           )}
+
           <div className="flex gap-2 mt-3">
             <button
               onClick={sealNewSeed}
-              disabled={busy || (!canPasskey && passphrase.length < 8)}
+              disabled={busy || (sealMode === 'passphrase' && passphrase.length < 8)}
               className="px-3 py-2 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-50 text-sm text-white"
             >
-              {busy ? '…' : canPasskey ? 'Seal with passkey' : 'Seal with passphrase'}
+              {busy ? '…' : sealMode === 'passkey' ? 'Seal with passkey' : 'Seal with passphrase'}
             </button>
             <button onClick={() => setStep('idle')} className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm">
               Cancel

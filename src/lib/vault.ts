@@ -21,6 +21,17 @@ const VAULT_KEY = 'kt-vault-v1';
 
 export type VaultMode = 'passkey' | 'passphrase';
 
+/** Raised when the device cannot derive a key from a passkey (no PRF support). */
+export class PrfUnsupportedError extends Error {
+  constructor() {
+    super('This device cannot derive a key from the passkey (no PRF support).');
+    this.name = 'PrfUnsupportedError';
+  }
+}
+
+/** What the browser tells us about WebAuthn PRF support. */
+export type PrfSupport = 'yes' | 'no' | 'unknown';
+
 export interface VaultRecord {
   v: 1;
   mode: VaultMode;
@@ -132,20 +143,32 @@ function prfBytes(results: PrfResults | undefined): Uint8Array | null {
   return first ? new Uint8Array(first) : null;
 }
 
-/** True when this browser can derive a key from a passkey (WebAuthn PRF). */
-export async function passkeySupported(): Promise<boolean> {
-  if (typeof window === 'undefined' || !window.PublicKeyCredential) return false;
+/**
+ * Whether this browser can derive a key from a passkey (WebAuthn PRF).
+ *
+ * Only some engines expose `getClientCapabilities` (Chrome). Where it is
+ * missing the answer is genuinely unknown, so callers must be ready for the
+ * passkey path to fail — see PrfUnsupportedError.
+ */
+export async function prfSupport(): Promise<PrfSupport> {
+  if (typeof window === 'undefined' || !window.PublicKeyCredential) return 'no';
   try {
     const caps = (await (
       window.PublicKeyCredential as unknown as {
         getClientCapabilities?: () => Promise<{ extensions?: { prf?: boolean } }>;
       }
     ).getClientCapabilities?.()) ?? { extensions: {} };
-    if (caps.extensions?.prf === false) return false;
+    if (caps.extensions?.prf === true) return 'yes';
+    if (caps.extensions?.prf === false) return 'no';
   } catch {
-    /* getClientCapabilities is optional — fall through to the optimistic path */
+    /* getClientCapabilities is optional — the answer stays unknown */
   }
-  return true;
+  return 'unknown';
+}
+
+/** Kept for callers that only need a yes/no answer. */
+export async function passkeySupported(): Promise<boolean> {
+  return (await prfSupport()) !== 'no';
 }
 
 /**
@@ -198,7 +221,9 @@ async function passkeyKey(
   ).getClientExtensionResults?.();
   const bytes = prfBytes(results);
   if (!bytes) {
-    throw new Error('This device cannot derive a key from the passkey (no PRF support).');
+    // The authenticator accepted the assertion but produced no PRF output:
+    // this engine cannot derive a key from a passkey.
+    throw new PrfUnsupportedError();
   }
   return aesKeyFromBytes(bytes);
 }

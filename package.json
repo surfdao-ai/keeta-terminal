@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:vault": "node --experimental-strip-types scripts/vault-test.mjs",
+    "smoke": "bash scripts/smoke.sh"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.143",
