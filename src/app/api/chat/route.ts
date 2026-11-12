@@ -134,10 +134,16 @@ export async function POST(req: Request) {
   });
 
   // onError lives on the stream (not the response): it replaces the default
-  // "An error occurred." with the real reason.
+  // "An error occurred." with the real reason. The inner stream carries the
+  // provider failure, so the handler has to be attached there.
   const uiStream = createUIMessageStream({
     execute: async ({ writer }) => {
-      writer.merge(toUIMessageStream({ stream: result.stream }));
+      writer.merge(
+        toUIMessageStream({
+          stream: result.stream,
+          onError: (error) => friendlyModelError(error),
+        }),
+      );
     },
     onError: (error) => friendlyModelError(error),
   });
