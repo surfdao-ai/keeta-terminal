@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { createSession, destroySession, getSession } from '@/lib/agent/session';
 import { createWallet, unlockWallet, hasWallet, walletAddress } from '@/lib/keeta/wallet';
 
-export const runtime = 'nodejs';
 
 export async function GET() {
   const addr = await walletAddress();

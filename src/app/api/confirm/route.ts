@@ -5,7 +5,6 @@ import { getSession } from '@/lib/agent/session';
 import { loadPending, removePending, appendTrade, capSpent, addCapSpend, dailyCapUsd, isExpired } from '@/lib/agent/safety';
 import { unlockWallet } from '@/lib/keeta/wallet';
 
-export const runtime = 'nodejs';
 
 export async function POST(req: Request) {
   const body = (await req.json()) as { tradeId?: string };

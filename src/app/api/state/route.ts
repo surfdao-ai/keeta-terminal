@@ -5,7 +5,6 @@ import { userClient } from '@/lib/keeta/network';
 import { capSpent, dailyCapUsd } from '@/lib/agent/safety';
 import { hasWallet, walletAddress } from '@/lib/keeta/wallet';
 
-export const runtime = 'nodejs';
 
 export async function GET(req: Request) {
   const cookie = req.headers.get('cookie') ?? '';

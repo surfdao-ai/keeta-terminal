@@ -14,7 +14,6 @@ import { buildTools } from '@/lib/agent/tools';
 import { buildModel } from '@/lib/llm';
 import type { ProviderConfig } from '@/lib/llm';
 
-export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 const ALLOWED_MCP_TOOLS = new Set([
