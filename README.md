@@ -68,12 +68,11 @@ npm run dev
 On first load the terminal shows a **Model setup** dialog. Pick a provider and paste your key:
 
 - Vercel AI Gateway (uses server key / OIDC, or your own key) — *needs a credit card on the Vercel account*
+- **Groq (free tier)** — the default; key from console.groq.com
 - **Free, no key (Pollinations)** — works immediately, no account, no card
 - OpenRouter
-- Groq
 - Together
 - Ollama Cloud (`https://ollama.com/v1`, key from ollama.com/settings/keys)
-- Kilo Gateway (`https://api.kilo.ai/api/gateway`, key from app.kilo.ai)
 - Ollama (local)
 - LM Studio (local)
 - Custom OpenAI-compatible endpoint
@@ -109,8 +108,8 @@ Confirm trades in the UI. The daily cap defaults to $100 and is enforced before 
 - x402 paid reads (KeeSpecs deep analytics) are not wired in v1 — only free reads are exposed to the agent.
 - The Vercel AI Gateway needs a credit card on the account before it will serve
   requests (`vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card`).
-  Without one, use the "Model setup" dialog to paste an OpenRouter / Groq /
-  Together key instead — that path never touches the Vercel gateway.
+  Without one, use the "Model setup" dialog: Groq's free tier is the default,
+  and "Free, no key" needs no account at all — neither touches the Vercel gateway.
 - Automations run from the Vercel schedule every 15 minutes (`vercel.json` →
   `schedules.automations-run`). The schedule authenticates with
   `Authorization: Bearer $CRON_SECRET`; unauthenticated callers may still
@@ -137,6 +136,9 @@ node scripts/generate-icons.mjs
 - `public/manifest.webmanifest` — installable, standalone, maskable icon
 - `public/sw.js` — app-shell caching (API requests are never cached)
 - iOS: Share → Add to Home Screen
+- The shell is pinned to the layout viewport (`body` is fixed, `overscroll-behavior: none`),
+  so opening the keyboard no longer resizes or scrolls the app. The keyboard's height is
+  published as `--kb` by `<ViewportLock />` and the composer is lifted above it.
 
 ## Stack
 

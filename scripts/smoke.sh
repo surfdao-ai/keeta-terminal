@@ -49,6 +49,13 @@ check "POST /api/chat (no provider -> 400)" 400 "$(code -X POST $BASE/api/chat -
 echo
 echo "== api: wallet + session =="
 unlock=$(curl -sS --max-time 90 -c "$JAR" -X POST $BASE/api/unlock -H 'content-type: application/json' -d "{\"passphrase\":\"$PASS\",\"mode\":\"unlock\"}")
+if echo "$unlock" | grep -q "No wallet stored"; then
+  # Fresh install: create the wallet so the rest of the run has something to
+  # unlock. It stays behind with this passphrase — the app's "Create" button
+  # overwrites it.
+  unlock=$(curl -sS --max-time 90 -c "$JAR" -X POST $BASE/api/unlock -H 'content-type: application/json' -d "{\"passphrase\":\"$PASS\",\"mode\":\"create\"}")
+  echo "note: no wallet existed, created one (passphrase: $PASS)"
+fi
 addr=$(echo "$unlock" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).address||'')}catch(e){console.log('')}})")
 if [ -n "$addr" ]; then printf 'PASS  %-46s %s\n' "unlock -> address" "${addr:0:16}…"
 else echo "FAIL  unlock -> no address ($unlock)"; fails=$((fails+1)); fi
