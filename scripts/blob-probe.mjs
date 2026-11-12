@@ -46,3 +46,11 @@ for (let i = 1; i <= 3; i++) {
   const t = r && r.statusCode === 200 ? await new Response(r.stream).text() : '<none>';
   console.log(`get-after-overwrite #${i} ->`, t, '| fresh =', t === JSON.stringify(v2));
 }
+
+// Same again, but bypassing the CDN cache.
+const v3 = { writtenAt: new Date().toISOString(), n: Math.random(), revision: 3 };
+await put(path, JSON.stringify(v3), { ...opts, contentType: 'application/json', allowOverwrite: true });
+const noCache = await get(path, { ...opts, useCache: false });
+const t3 = noCache && noCache.statusCode === 200 ? await new Response(noCache.stream).text() : '<none>';
+console.log('\nput3  ->', v3);
+console.log('get (useCache:false) ->', t3, '| fresh =', t3 === JSON.stringify(v3));

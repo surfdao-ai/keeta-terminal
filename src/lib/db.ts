@@ -125,6 +125,9 @@ const blobDB: FileDB = {
         // Pin the same store the writer uses; never fall back to OIDC/store-id
         // resolution, which could point at a different store than the token.
         token: process.env.BLOB_READ_WRITE_TOKEN,
+        // Read from origin storage: the CDN copy of an overwritten object is
+        // stale for a short while, which would break read-after-write.
+        useCache: false,
       });
       if (!res || res.statusCode !== 200) return null;
       const text = await new Response(res.stream).text();
