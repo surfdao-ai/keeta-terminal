@@ -1,11 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
-import ToolCard from '@/components/ToolCard';
+import { useState, useEffect } from 'react';
+import type { UIMessage } from 'ai';
 import PwaRegister, { type BeforeInstallPromptEvent } from '@/components/PwaRegister';
 import Automations from '@/components/Automations';
+import ChatPanel from '@/components/ChatPanel';
 
 type ProviderConfig = {
   type: 'gateway' | 'openai-compatible';
@@ -65,21 +64,15 @@ export default function Home() {
   const [mode, setMode] = useState<'unlock' | 'create'>('unlock');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const [input, setInput] = useState('');
   const [state, setState] = useState<{ balances: { token: string; display: string }[]; cap: { spentUsd: number; capUsd: number } } | null>(null);
   const [capInput, setCapInput] = useState('100');
   const [capSaving, setCapSaving] = useState(false);
   const [capMsg, setCapMsg] = useState('');
   const [notice, setNotice] = useState('');
+  const [chats, setChats] = useState<{ id: string; title: string; updatedAt: string }[]>([]);
+  const [activeChatId, setActiveChatId] = useState('');
+  const [activeMessages, setActiveMessages] = useState<UIMessage[]>([]);
 
-  const transport = new DefaultChatTransport({
-    api: '/api/chat',
-    prepareSendMessagesRequest: ({ messages }) => ({
-      body: { messages, providerConfig: cfg ?? undefined },
-    }),
-  });
-  const { messages, sendMessage, status } = useChat({ transport });
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const c = loadCfg();
@@ -93,6 +86,83 @@ export default function Home() {
     setUnlock({ hasWallet: j.hasWallet, address: j.address, unlocked: j.unlocked });
     setState(j);
   }
+
+  async function loadChats() {
+    const r = await fetch('/api/chats');
+    const j = await r.json();
+    setChats(j.chats ?? []);
+    return j.chats ?? [];
+  }
+
+  async function openChat(id: string) {
+    const r = await fetch(`/api/chats?id=${encodeURIComponent(id)}`);
+    const j = await r.json();
+    setActiveChatId(id);
+    setActiveMessages(j.chat?.messages ?? []);
+    setView('chat');
+    setNavOpen(false);
+  }
+
+  async function newChat() {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await fetch('/api/chats', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, title: 'new chat', messages: [] }),
+    });
+    setActiveChatId(id);
+    setActiveMessages([]);
+    setView('chat');
+    setNavOpen(false);
+    await loadChats();
+  }
+
+  async function removeChat(id: string) {
+    await fetch('/api/chats', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    if (id === activeChatId) {
+      const list = await loadChats();
+      if (list.length) {
+        await openChat(list[0].id);
+      } else {
+        await newChat();
+      }
+    } else {
+      await loadChats();
+    }
+  }
+
+  function handleChatSaved(chat: { id: string; title: string; updatedAt: string }) {
+    setChats((prev) => {
+      const rest = prev.filter((c) => c.id !== chat.id);
+      return [chat, ...rest].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    });
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const list = await loadChats();
+      if (cancelled) return;
+      if (list.length) {
+        const r = await fetch(`/api/chats?id=${encodeURIComponent(list[0].id)}`);
+        const j = await r.json();
+        if (cancelled) return;
+        setActiveChatId(list[0].id);
+        setActiveMessages(j.chat?.messages ?? []);
+      } else {
+        await newChat();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     refresh();
     const t = setInterval(refresh, 15000);
@@ -123,10 +193,6 @@ export default function Home() {
       setCapSaving(false);
     }
   }
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, status]);
 
   // While the app is open, evaluate automations more often than the 15m schedule.
   useEffect(() => {
@@ -222,7 +288,6 @@ export default function Home() {
     await refresh();
   }
 
-  const loading = status === 'streaming' || status === 'submitted';
   const preset = PRESETS.find((x) => x.id === presetId)!;
   const balances = state?.balances || [];
   const cap = state?.cap;
@@ -265,12 +330,43 @@ export default function Home() {
         </div>
 
         <button
-          onClick={() => { setView('chat'); setNavOpen(false); }}
+          onClick={() => { newChat(); }}
           className="mx-3 mt-3 px-3 py-2 rounded-lg bg-purple-900/40 border border-purple-700/60 font-mono text-[13px] text-purple-200 hover:bg-purple-900/60 flex items-center gap-2"
         >
           <span className="text-purple-400">+</span>
           {sidebarOpen && <span>new chat</span>}
         </button>
+
+        {sidebarOpen && (
+          <div className="px-3 mt-4">
+            <div className="px-2 pb-1.5 font-mono text-[10px] uppercase tracking-wider text-zinc-700">chats</div>
+            <div className="space-y-0.5 max-h-40 overflow-y-auto">
+              {chats.length === 0 && <div className="px-2 text-[11px] text-zinc-700">no saved chats</div>}
+              {chats.map((c) => (
+                <div key={c.id} className="group flex items-center gap-1">
+                  <button
+                    onClick={() => openChat(c.id)}
+                    className={`flex-1 text-left px-2 py-1.5 rounded font-mono text-[11px] truncate transition ${
+                      c.id === activeChatId
+                        ? 'bg-zinc-800 text-zinc-100'
+                        : 'text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-300'
+                    }`}
+                    title={c.title}
+                  >
+                    {c.title}
+                  </button>
+                  <button
+                    onClick={() => removeChat(c.id)}
+                    aria-label="delete chat"
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 px-1 text-zinc-600 hover:text-red-400 font-mono text-[11px]"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {sidebarOpen && <div className="px-2 pb-2 font-mono text-[10px] uppercase tracking-wider text-zinc-700">workspace</div>}
@@ -316,162 +412,18 @@ export default function Home() {
       {/* main */}
       <main className="flex-1 flex flex-col min-w-0 bg-[#09090B] pt-12 md:pt-0">
         {view === 'chat' && (
-          <>
-            <div ref={scrollRef} className="flex-1 overflow-y-auto">
-              {messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center px-6">
-                  <div className="w-full max-w-2xl">
-                    <div className="bg-[#0d0d10] border border-zinc-800 rounded-lg overflow-hidden shadow-[0_0_60px_-20px_rgba(76,29,149,0.5)]">
-                      <div className="flex items-center gap-2 px-4 py-2 bg-[#141416] border-b border-zinc-800">
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
-                        <span className="ml-3 font-mono text-[11px] text-zinc-500">kterminal — keeta:agent</span>
-                      </div>
-                      <div className="p-5 font-mono text-[13px] leading-relaxed">
-                        <div className="text-zinc-500">KTerminal v1.0 — keeta mainnet</div>
-                        <div className="text-zinc-500">agent <span className="text-emerald-400">online</span> · wallet <span className={unlock.unlocked ? 'text-emerald-400' : 'text-amber-400'}>{unlock.unlocked ? 'unlocked' : 'locked'}</span> · model <span className="text-zinc-400">{cfg ? cfg.model : 'not configured'}</span></div>
-                        <div className="mt-3 text-zinc-400">
-                          <span className="text-purple-400">&gt;</span> <span className="inline-block w-2 h-4 bg-purple-500 animate-pulse align-middle" />
-                        </div>
-                      </div>
-                    </div>
-                    <h1 className="mt-8 text-center text-3xl font-bold tracking-tight">What&apos;s on your mind?</h1>
-                    <p className="mt-2 text-center text-sm text-zinc-500">
-                      Check balances, list tokens, get quotes, or propose a trade on Keeta.
-                    </p>
-                    <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {['portfolio', 'list tokens', 'estimate 1 KTA to USDC', 'propose 0.1 KTA for USDC'].map((q) => (
-                        <button
-                          key={q}
-                          onClick={() => setInput(q)}
-                          className="font-mono text-[12px] px-4 py-2.5 rounded-lg bg-[#141416] border border-zinc-800 hover:border-purple-600 text-zinc-400 hover:text-zinc-200 text-left transition"
-                        >
-                          <span className="text-purple-400">&gt;</span> {q}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="max-w-4xl mx-auto px-3 sm:px-5 py-4 sm:py-6">
-                  {/* terminal window chrome */}
-                  <div className="bg-[#0d0d10] border border-zinc-800 rounded-lg overflow-hidden shadow-[0_0_60px_-20px_rgba(76,29,149,0.5)]">
-                    <div className="flex items-center gap-2 px-4 py-2 bg-[#141416] border-b border-zinc-800">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
-                      <span className="ml-3 font-mono text-[11px] text-zinc-500">kterminal — keeta:agent</span>
-                      <span className="ml-auto font-mono text-[11px] text-zinc-600">
-                        {cap ? `cap ${cap.spentUsd.toFixed(2)}/${cap.capUsd}` : 'cap 0.00/100'}
-                      </span>
-                    </div>
-                    <div className="p-4 font-mono text-[13px] leading-relaxed">
-                      {messages.map((m) => (
-                        <div key={m.id} className="mb-3">
-                          {m.role === 'user' ? (
-                            <div className="flex gap-2">
-                              <span className="text-purple-400 select-none">&gt;</span>
-                              <span className="text-[#F7F7F7] whitespace-pre-wrap break-words">{m.parts.filter((p) => p.type === 'text').map((p) => (p as { text: string }).text).join(' ')}</span>
-                            </div>
-                          ) : (
-                            <div>
-                              {m.parts.map((part, i) => {
-                                if (part.type === 'text') {
-                                  const txt = (part as { text: string }).text;
-                                  if (!txt.trim()) return null;
-                                  return (
-                                    <div key={i} className="flex gap-2">
-                                      <span className="text-emerald-500 select-none">◆</span>
-                                      <span className="text-zinc-200 whitespace-pre-wrap break-words">{txt}</span>
-                                    </div>
-                                  );
-                                }
-                                if (part.type.startsWith('tool-')) {
-                                  const toolName = part.type.slice(5);
-                                  const st = (part as { state?: string }).state;
-                                  const inp = (part as { input?: unknown }).input;
-                                  const out = (part as { output?: unknown }).output;
-                                  return (
-                                    <ToolCard
-                                      key={i}
-                                      name={toolName}
-                                      state={st}
-                                      input={inp}
-                                      output={out}
-                                      onConfirm={confirmTrade}
-                                    />
-                                  );
-                                }
-                                return null;
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      {loading && (
-                        <div className="flex gap-2">
-                          <span className="text-emerald-500 select-none">◆</span>
-                          <span className="text-zinc-500">
-                            running<span className="animate-pulse">_</span>
-                          </span>
-                        </div>
-                      )}
-                      {!loading && (
-                        <div className="flex gap-2">
-                          <span className="text-purple-400 select-none">&gt;</span>
-                          <span className="inline-block w-2 h-4 bg-purple-500 animate-pulse align-middle" />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-zinc-800/80 p-3 sm:p-4 bg-[#09090B] pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-4">
-              <div className="max-w-4xl mx-auto">
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!input.trim() || loading) return;
-                    sendMessage({ text: input });
-                    setInput('');
-                  }}
-                  className="flex gap-2 items-end bg-[#0d0d10] border border-zinc-800 rounded-lg px-4 py-3 focus-within:border-purple-600 transition font-mono"
-                >
-                  <span className="text-purple-400 select-none leading-6">&gt;</span>
-                  <textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        if (input.trim() && !loading) {
-                          sendMessage({ text: input });
-                          setInput('');
-                        }
-                      }
-                    }}
-                    placeholder="Ask anything..."
-                    rows={1}
-                    className="flex-1 bg-transparent resize-none outline-none text-[13px] text-[#F7F7F7] placeholder-zinc-600 max-h-40"
-                  />
-                  <button
-                    type="submit"
-                    disabled={loading || !input.trim()}
-                    className="px-3 py-1.5 rounded bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-[12px] font-medium text-white shrink-0"
-                  >
-                    send
-                  </button>
-                </form>
-                <p className="font-mono text-[10px] text-zinc-700 mt-2 text-center">
-                  {unlock.unlocked ? `wallet ${unlock.address?.slice(0, 12)}… unlocked` : 'wallet locked — unlock in sidebar to trade'}
-                  {cfg ? ` · ${cfg.model}` : ' · no model configured'}
-                </p>
-              </div>
-            </div>
-          </>
+          <ChatPanel
+            key={activeChatId}
+            chatId={activeChatId}
+            initialMessages={activeMessages}
+            providerConfig={cfg}
+            cap={cap ?? null}
+            unlocked={unlock.unlocked}
+            address={unlock.address}
+            modelLabel={cfg ? cfg.model : ''}
+            onSaved={handleChatSaved}
+            onConfirm={confirmTrade}
+          />
         )}
 
         {view === 'wallet' && (
