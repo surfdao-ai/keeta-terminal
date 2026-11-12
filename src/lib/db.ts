@@ -135,6 +135,8 @@ const blobDB: FileDB = {
       access: 'private',
       contentType: 'application/json',
       addRandomSuffix: false,
+      // Same key -> same object: overwrite in place.
+      allowOverwrite: true,
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
   },
