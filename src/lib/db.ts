@@ -17,7 +17,7 @@
  *   cap:<date>  — { spentUsd } daily cap counter, keyed by UTC date
  *   automations — list of price alerts / recurring swaps
  */
-import { promises as fs } from 'node:fs';
+import { promises as fs, accessSync, constants } from 'node:fs';
 import path from 'node:path';
 
 const DATA_DIR = path.join(process.cwd(), '.data');
@@ -148,6 +148,26 @@ function useBlob(): boolean {
 
 export type BackendName = 'postgres' | 'blob' | 'file';
 
+let cwdWritable: boolean | null = null;
+
+/**
+ * Vercel Functions mount the bundle read-only (/var/task), so the working
+ * directory is not writable there. That is the reliable signal that we are
+ * running on Vercel — the VERCEL* env vars are also present in local
+ * .env.local files.
+ */
+function isRuntimeWritable(): boolean {
+  if (cwdWritable === null) {
+    try {
+      accessSync(process.cwd(), constants.W_OK);
+      cwdWritable = true;
+    } catch {
+      cwdWritable = false;
+    }
+  }
+  return cwdWritable;
+}
+
 /**
  * KV_BACKEND pins the backend (postgres | blob | file). Unset means
  * auto-detect: Postgres, then Blob, then the local file store.
@@ -156,7 +176,8 @@ function selectedBackend(): BackendName {
   const forced = process.env.KV_BACKEND?.trim().toLowerCase();
   if (forced === 'postgres' || forced === 'blob' || forced === 'file') return forced;
   if (usePostgres()) return 'postgres';
-  if (useBlob()) return 'blob';
+  // Blob auth relies on the Vercel OIDC token (or a read-write token).
+  if (useBlob() && (process.env.VERCEL_OIDC_TOKEN || process.env.BLOB_READ_WRITE_TOKEN)) return 'blob';
   return 'file';
 }
 
@@ -164,12 +185,11 @@ async function backend(): Promise<FileDB> {
   const name = selectedBackend();
   if (name === 'postgres') return getPostgres();
   if (name === 'blob') return blobDB;
-  // On Vercel a missing store is a configuration error, not a reason to fall
-  // back to the (unusable) file backend — surface it instead.
-  if (process.env.VERCEL) {
+  // A read-only runtime means the file store cannot work at all: surface the
+  // misconfiguration instead of silently losing every write.
+  if (!isRuntimeWritable()) {
     throw new Error(
-      'No persistent store configured. Set DATABASE_URL (Postgres) or BLOB_STORE_ID (Vercel Blob); ' +
-        'set KV_BACKEND=file to explicitly opt out of durable storage.',
+      'No persistent store configured. Set DATABASE_URL (Postgres) or BLOB_STORE_ID (Vercel Blob) for this environment.',
     );
   }
   return fileDB;
