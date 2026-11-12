@@ -299,7 +299,12 @@ export default function Home() {
       const j = await r.json();
       if (j.error) {
         setModelOptions([]);
-        setModelsError(String(j.error));
+        const needsKey = /401|unauthor|api key/i.test(String(j.error));
+        setModelsError(
+          needsKey && !key
+            ? 'This provider needs an API key — paste it above, then press "load models".'
+            : String(j.error),
+        );
         return;
       }
       const list: string[] = Array.isArray(j.models) ? j.models : [];
