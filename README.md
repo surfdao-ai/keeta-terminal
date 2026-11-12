@@ -16,8 +16,34 @@ An AI chat trading terminal for the Keeta Network — a bnkr.bot-style agent, bu
 ## Requirements
 
 - Node.js 22+
-- A Vercel AI Gateway API key (`AI_GATEWAY_API_KEY`)
-- Optional: Postgres connection string (`DATABASE_URL`) — otherwise a local `.data/` file store is used
+- A Vercel AI Gateway API key (`AI_GATEWAY_API_KEY`) — or paste a provider key in the UI
+- A durable store (see [Storage](#storage)) — required on Vercel
+
+## Storage
+
+The terminal keeps every piece of state in one key/value store: the encrypted
+wallet seed, the trade log, the daily spend cap, the automations and the saved
+chats. Three backends, picked automatically:
+
+| Backend | Selected when | Notes |
+|---|---|---|
+| Postgres | `DATABASE_URL` is set | `kt_store` key/value table, created on first use |
+| Vercel Blob | `BLOB_STORE_ID` is set | one private JSON object per key, OIDC or read-write token |
+| Local file | neither is set | `.data/terminal.json` — **development only** |
+
+On Vercel the bundle filesystem is read-only (`/var/task`), so the file backend
+cannot work there — writes fail with `ENOENT` and every function instance would
+see a different store. Set `KV_BACKEND=postgres|blob|file` to pin one explicitly.
+
+Because Blob objects are served through a CDN, reads use `useCache: false` —
+otherwise a freshly written value is invisible for a short while.
+
+```bash
+vercel storage create kt-kv --type blob --access private
+vercel storage connect kt-kv --auth oidc
+```
+
+`node scripts/blob-dump.mjs [storeId]` prints every key currently stored.
 
 ## Run locally
 
@@ -57,6 +83,14 @@ Confirm trades in the UI. The daily cap defaults to $100 and is enforced before 
 - Mainnet by default. Start with dust amounts.
 - The agent wallet lives in server memory while unlocked; on a cold start (new serverless instance) you must unlock again.
 - x402 paid reads (KeeSpecs deep analytics) are not wired in v1 — only free reads are exposed to the agent.
+- The Vercel AI Gateway needs a credit card on the account before it will serve
+  requests (`vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card`).
+  Without one, use the "Model setup" dialog to paste an OpenRouter / Groq /
+  Together key instead — that path never touches the Vercel gateway.
+- Automations run from the Vercel schedule every 15 minutes (`vercel.json` →
+  `schedules.automations-run`). The schedule authenticates with
+  `Authorization: Bearer $CRON_SECRET`; unauthenticated callers may still
+  evaluate alerts but never sign a swap.
 
 ## Token launches
 
