@@ -14,8 +14,8 @@ import {
 } from '@/lib/vault';
 import { generateSeedOnDevice, addressFromSeedOnDevice } from '@/lib/keeta/device';
 
-/** Keeta addresses are 'keeta_' plus 63 base58 characters. */
-const ADDRESS_RE = /^keeta_[a-z0-9]{40,}$/;
+/** Keeta addresses: 'keeta_' plus an encoded public key (alphanumeric). */
+const ADDRESS_RE = /^keeta_[A-Za-z0-9]{32,}$/;
 
 interface WalletPanelProps {
   address: string | null;

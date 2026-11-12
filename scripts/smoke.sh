@@ -87,15 +87,17 @@ if [ -n "$aid" ]; then printf 'PASS  %-46s %s\n' "create alert" "${aid:0:8}…";
 
 run=$(curl -sS --max-time 120 -X POST $BASE/api/automations/run -H 'content-type: application/json' -d "{\"seed\":\"$SEED\"}")
 checked=$(echo "$run" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).checked)}catch(e){console.log(-1)}})")
-check "manual run checks the alert" 1 "$checked"
+# Other automations may exist (the user's own), so check ">= 1" rather than an exact count.
+if [ "${checked:-0}" -ge 1 ] 2>/dev/null; then printf 'PASS  %-46s %s checked\n' "manual run checks the alerts" "$checked"
+else printf 'FAIL  %-46s %s\n' "manual run checks the alerts" "$checked"; fails=$((fails+1)); fi
 
 toggled=$(curl -sS --max-time 60 -X POST $BASE/api/automations -H 'content-type: application/json' -d "{\"action\":\"toggle\",\"id\":\"$aid\",\"seed\":\"$SEED\"}" \
   | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).automation.enabled)}catch(e){console.log('?')}})")
 check "toggle flips enabled" false "$toggled"
 
 curl -sS --max-time 60 -X POST $BASE/api/automations -H 'content-type: application/json' -d "{\"action\":\"delete\",\"id\":\"$aid\",\"seed\":\"$SEED\"}" >/dev/null
-left=$(curl -sS --max-time 30 $BASE/api/automations | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).automations.length)}catch(e){console.log(-1)}})")
-check "delete removes the alert" 0 "$left"
+gone=$(curl -sS --max-time 30 $BASE/api/automations | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).automations.some(a=>a.id==='$aid')?'still-there':'gone')}catch(e){console.log('?')}})")
+check "delete removes the alert" gone "$gone"
 
 echo
 echo "== api: chat with the free provider + skills =="
