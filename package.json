@@ -9,13 +9,21 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^4.0.143",
+    "@ai-sdk/mcp": "^2.0.97",
+    "@ai-sdk/react": "^4.0.174",
+    "@keetanetwork/anchor": "^0.0.108",
+    "@keetanetwork/keetanet-client": "^0.19.1",
+    "ai": "^7.0.170",
     "next": "16.4.6",
+    "postgres": "^4.1.1",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "4.3.3",
-    "@types/node": "^20",
+    "@types/node": "^26.6.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

@@ -1,36 +1,47 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Keeta Terminal
 
-## Getting Started
+An AI chat trading terminal for the Keeta Network — a bnkr.bot-style agent, but for Keeta.
 
-First, run the development server:
+## Features
+
+- Streaming AI chat (Vercel AI Gateway) with Keeta-specific tools
+- Non-custodial wallet: passphrase-encrypted seed, AES-256-GCM, stored server-side
+- Atomic swaps via Keeta FX anchors (propose → confirm on every trade)
+- Hard daily spend cap enforced in code before any block is signed
+- Read-only Keeta market data via KeeSpecs MCP (prices, providers, tokens)
+- Trade history log
+
+## Requirements
+
+- Node.js 22+
+- A Vercel AI Gateway API key (`AI_GATEWAY_API_KEY`)
+- Optional: Postgres connection string (`DATABASE_URL`) — otherwise a local `.data/` file store is used
+
+## Run locally
 
 ```bash
+cp .env.example .env.local
+# edit .env.local: set AI_GATEWAY_API_KEY (and optionally KEETA_NETWORK=test, DAILY_SPEND_CAP_USD)
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000, create a wallet with a strong passphrase, then ask:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- "what's my portfolio?"
+- "list tradable tokens"
+- "estimate 1 KTA to USDC"
+- "propose trading 0.1 KTA for USDC"
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Confirm trades in the UI. The daily cap defaults to $100 and is enforced before signing.
 
-## Learn More
+## Notes
 
-To learn more about Next.js, take a look at the following resources:
+- Keeta has no smart contracts / no AMM or DEX. Liquidity comes from FX anchor providers; if no provider issues a binding quote for a pair, the terminal refuses to execute rather than fake it.
+- Mainnet by default. Start with dust amounts.
+- The agent wallet lives in server memory while unlocked; on a cold start (new serverless instance) you must unlock again.
+- x402 paid reads (KeeSpecs deep analytics) are not wired in v1 — only free reads are exposed to the agent.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Stack
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Next.js 16 (App Router) · AI SDK 7 · Vercel AI Gateway · @keetanetwork/keetanet-client · @keetanetwork/anchor · KeeSpecs MCP · Postgres (optional)
