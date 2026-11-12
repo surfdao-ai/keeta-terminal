@@ -159,12 +159,13 @@ export async function POST(req: Request) {
 function friendlyModelError(error: unknown): string {
   const err = error as { name?: string; message?: string; statusCode?: number; cause?: { message?: string } };
   const blob = `${err?.name ?? ''} ${err?.message ?? ''} ${err?.cause?.message ?? ''}`;
+  console.error('[chat-error]', err?.name, JSON.stringify(blob).slice(0, 400));
 
-  if (/credit card|customer_verification_required|credits/i.test(blob)) {
-    return 'Vercel AI Gateway needs a credit card on the account. Open "Model setup" and switch to a provider that does not need one (Ollama Cloud, Kilo Gateway, OpenRouter, Groq, Together).';
+  if (/credit card|customer_verification_required|unlock your free credits/i.test(blob)) {
+    return 'The Vercel AI Gateway needs a credit card on this account. Open "Model setup" and switch to a provider that works without one (Ollama Cloud, Kilo Gateway, OpenRouter, Groq, Together).';
   }
-  if (/ai gateway|gateway/i.test(blob) && err?.statusCode === 403) {
-    return 'Vercel AI Gateway refused the request (403). Open "Model setup" and switch to a provider that does not need a credit card.';
+  if (/GatewayAuthenticationError|authentication failed|invalid api key|Unauthenticated/i.test(blob)) {
+    return 'The server-side AI Gateway credential is not usable. Open "Model setup" and pick a provider (Ollama Cloud, Kilo Gateway, OpenRouter, Groq, Together) — those need no Vercel credit card.';
   }
   if (/api key|unauthorized|401/i.test(blob)) {
     return 'Provider rejected the API key. Open "Model setup" and check the key.';
