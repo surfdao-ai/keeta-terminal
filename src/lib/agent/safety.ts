@@ -93,8 +93,35 @@ export async function addCapSpend(usd: number): Promise<void> {
   await dbWrite(key, { spentUsd: (cur?.spentUsd ?? 0) + usd });
 }
 
-export function dailyCapUsd(): number {
+export interface TerminalSettings {
+  dailyCapUsd: number;
+  updatedAt: string;
+}
+
+/** Fallback cap when the user has not set one: the DAILY_SPEND_CAP_USD env var. */
+export function defaultCapUsd(): number {
   const raw = process.env.DAILY_SPEND_CAP_USD;
   const n = raw ? Number(raw) : 100;
   return Number.isFinite(n) && n > 0 ? n : 100;
+}
+
+export const MAX_CAP_USD = 1_000_000;
+
+export async function getSettings(): Promise<TerminalSettings> {
+  const s = await dbRead<TerminalSettings>('settings');
+  if (s && Number.isFinite(s.dailyCapUsd) && s.dailyCapUsd > 0) return s;
+  return { dailyCapUsd: defaultCapUsd(), updatedAt: '' };
+}
+
+/** The effective daily cap (user setting, else env default). */
+export async function dailyCapUsd(): Promise<number> {
+  return (await getSettings()).dailyCapUsd;
+}
+
+export async function setDailyCap(usd: number): Promise<TerminalSettings> {
+  if (!Number.isFinite(usd) || usd <= 0) throw new Error('Cap must be a positive number');
+  if (usd > MAX_CAP_USD) throw new Error(`Cap cannot exceed $${MAX_CAP_USD.toLocaleString()}`);
+  const settings: TerminalSettings = { dailyCapUsd: usd, updatedAt: new Date().toISOString() };
+  await dbWrite('settings', settings);
+  return settings;
 }

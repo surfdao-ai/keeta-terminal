@@ -27,6 +27,6 @@ export async function GET(req: Request) {
     address,
     unlocked: Boolean(session),
     balances,
-    cap: { spentUsd: await capSpent(), capUsd: dailyCapUsd() },
+    cap: { spentUsd: await capSpent(), capUsd: await dailyCapUsd() },
   });
 }

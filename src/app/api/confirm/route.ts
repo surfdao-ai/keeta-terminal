@@ -99,7 +99,7 @@ export async function POST(req: Request) {
     else if (/USD/i.test((fromInfo as { symbol?: string }).symbol ?? '')) usdValue = Number(amount);
 
     const spent = await capSpent();
-    const cap = dailyCapUsd();
+    const cap = await dailyCapUsd();
     if (usdValue > 0 && spent + usdValue > cap) {
       await removePending(tradeId);
       return NextResponse.json({ error: `Daily cap exceeded: ${spent.toFixed(2)} + ${usdValue.toFixed(2)} > ${cap}` }, { status: 403 });

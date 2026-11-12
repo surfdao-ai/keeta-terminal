@@ -217,11 +217,15 @@ export function buildTools(ctx: ToolContext) {
     get_cap_status: tool({
       description: 'Show today\'s spend vs the daily cap.',
       inputSchema: z.object({}),
-      execute: async () => ({
-        spentUsd: await capSpent(),
-        capUsd: dailyCapUsd(),
-        remainingUsd: Math.max(0, dailyCapUsd() - (await capSpent())),
-      }),
+      execute: async () => {
+        const cap = await dailyCapUsd();
+        const spent = await capSpent();
+        return {
+          spentUsd: spent,
+          capUsd: cap,
+          remainingUsd: Math.max(0, cap - spent),
+        };
+      },
     }),
   };
 }
