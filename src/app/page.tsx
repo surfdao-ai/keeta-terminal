@@ -3,6 +3,7 @@
 import { useState, useEffect, useSyncExternalStore } from 'react';
 import type { UIMessage } from 'ai';
 import PwaRegister, { type BeforeInstallPromptEvent } from '@/components/PwaRegister';
+import ViewportLock from '@/components/ViewportLock';
 import Automations from '@/components/Automations';
 import ChatPanel from '@/components/ChatPanel';
 
@@ -15,14 +16,13 @@ type ProviderConfig = {
 };
 
 const PRESETS: { id: string; label: string; type: ProviderConfig['type']; baseUrl?: string; name?: string; defaultModel: string }[] = [
+  { id: 'groq', label: 'Groq (free tier)', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', name: 'groq', defaultModel: 'llama-3.3-70b-versatile' },
   { id: 'free', label: 'Free, no key (Pollinations)', type: 'openai-compatible', baseUrl: 'https://text.pollinations.ai/openai', name: 'pollinations', defaultModel: 'openai-fast' },
   { id: 'vercel', label: 'Vercel AI Gateway', type: 'gateway', defaultModel: 'anthropic/claude-sonnet-4.5' },
   { id: 'vercel-key', label: 'Vercel AI Gateway (your key)', type: 'openai-compatible', baseUrl: 'https://ai-gateway.vercel.sh/v1', name: 'vercel', defaultModel: 'anthropic/claude-sonnet-4.5' },
   { id: 'openrouter', label: 'OpenRouter', type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1', name: 'openrouter', defaultModel: 'openai/gpt-4o-mini' },
-  { id: 'groq', label: 'Groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', name: 'groq', defaultModel: 'llama-3.3-70b-versatile' },
   { id: 'together', label: 'Together', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', name: 'together', defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
   { id: 'ollama-cloud', label: 'Ollama Cloud', type: 'openai-compatible', baseUrl: 'https://ollama.com/v1', name: 'ollama-cloud', defaultModel: 'glm-5.3' },
-  { id: 'kilo', label: 'Kilo Gateway', type: 'openai-compatible', baseUrl: 'https://api.kilo.ai/api/gateway', name: 'kilo', defaultModel: 'kilo-auto/efficient' },
   { id: 'ollama', label: 'Ollama (local)', type: 'openai-compatible', baseUrl: 'http://localhost:11434/v1', name: 'ollama', defaultModel: 'llama3.1' },
   { id: 'lmstudio', label: 'LM Studio (local)', type: 'openai-compatible', baseUrl: 'http://localhost:1234/v1', name: 'lmstudio', defaultModel: 'local-model' },
   { id: 'custom', label: 'Custom (OpenAI-compatible)', type: 'openai-compatible', defaultModel: 'gpt-4o-mini' },
@@ -72,6 +72,27 @@ function subscribeCfg(onStoreChange: () => void): () => void {
 
 type View = 'chat' | 'wallet' | 'trade' | 'automations' | 'settings';
 
+/** Small trash can used by the saved-chat list. */
+function TrashIcon({ className = 'w-3.5 h-3.5' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M2.5 4.2h11" />
+      <path d="M6.4 4.2V3a1 1 0 0 1 1-1h1.2a1 1 0 0 1 1 1v1.2" />
+      <path d="M3.8 4.2l.6 8.4a1.2 1.2 0 0 0 1.2 1.1h4.8a1.2 1.2 0 0 0 1.2-1.1l.6-8.4" />
+      <path d="M6.6 6.6v4.6M9.4 6.6v4.6" />
+    </svg>
+  );
+}
+
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: 'chat', label: 'Chat', icon: '💬' },
   { id: 'wallet', label: 'Wallet', icon: '👛' },
@@ -87,10 +108,10 @@ export default function Home() {
   // The dialog opens by itself until the user dismisses it, and can always be
   // reopened from the "Model setup" button.
   const setupOpen = setupRequested || (!cfg && !setupDismissed);
-  const [presetId, setPresetId] = useState('free');
+  const [presetId, setPresetId] = useState('groq');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('openai-fast');
+  const [model, setModel] = useState('llama-3.3-70b-versatile');
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState('');
@@ -382,7 +403,7 @@ export default function Home() {
   const cap = state?.cap;
 
   return (
-    <div className="flex h-[100dvh] bg-[#09090B] text-[#F7F7F7]">
+    <div className="flex h-full bg-[#09090B] text-[#F7F7F7]">
       {/* mobile top bar */}
       <div className="md:hidden fixed top-0 inset-x-0 z-50 h-[var(--kt-header-h)] flex items-center gap-3 px-3 bg-[#101012] backdrop-blur border-b border-zinc-700/80 pt-[env(safe-area-inset-top,0px)] shadow-[0_2px_12px_rgba(0,0,0,0.65)]">
         <button
@@ -446,10 +467,11 @@ export default function Home() {
                   </button>
                   <button
                     onClick={() => removeChat(c.id)}
-                    aria-label="delete chat"
-                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 px-1 text-zinc-600 hover:text-red-400 font-mono text-[11px]"
+                    aria-label={`delete chat ${c.title}`}
+                    title="delete chat"
+                    className="shrink-0 p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-red-950/40 active:text-red-400 transition"
                   >
-                    ×
+                    <TrashIcon />
                   </button>
                 </div>
               ))}
@@ -773,6 +795,7 @@ export default function Home() {
       )}
 
       <PwaRegister onInstallPrompt={setInstallEvent} />
+      <ViewportLock />
     </div>
   );
 }

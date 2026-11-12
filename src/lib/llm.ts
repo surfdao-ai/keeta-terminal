@@ -18,7 +18,6 @@ const PRESETS: Record<string, { baseUrl: string; name: string }> = {
   lmstudio: { baseUrl: 'http://localhost:1234/v1', name: 'lmstudio' },
   groq: { baseUrl: 'https://api.groq.com/openai/v1', name: 'groq' },
   together: { baseUrl: 'https://api.together.xyz/v1', name: 'together' },
-  kilo: { baseUrl: 'https://api.kilo.ai/api/gateway', name: 'kilo' },
   vercel: { baseUrl: 'https://ai-gateway.vercel.sh/v1', name: 'vercel' },
 };
 

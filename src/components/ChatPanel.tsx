@@ -202,7 +202,7 @@ export default function ChatPanel({
         )}
       </div>
 
-      <div className="border-t border-zinc-800/80 p-3 sm:p-4 bg-[#09090B] pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-4">
+      <div className="border-t border-zinc-800/80 p-3 sm:p-4 bg-[#09090B] pb-[calc(0.75rem+env(safe-area-inset-bottom,0px)+var(--kb,0px))] sm:pb-[calc(1rem+env(safe-area-inset-bottom,0px)+var(--kb,0px))]">
         <div className="max-w-4xl mx-auto">
           <form
             onSubmit={(e) => {

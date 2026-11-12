@@ -25,4 +25,25 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-inter), Inter, system-ui, sans-serif;
+  /*
+   * Pin the shell to the layout viewport.
+   *
+   * On iOS the visual viewport shrinks when the on-screen keyboard opens and
+   * Safari scrolls the document to reveal the focused field. A fixed, non
+   * scrolling body keeps the app exactly the size it was, so the PWA stops
+   * resizing while you type. The keyboard's height is published as --kb by
+   * <ViewportLock /> and the composer is lifted above it.
+   */
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+html {
+  height: 100%;
+  overscroll-behavior: none;
+  /* Keyboard inset, kept in sync by <ViewportLock />. */
+  --kb: 0px;
 }
