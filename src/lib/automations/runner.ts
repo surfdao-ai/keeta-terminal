@@ -6,7 +6,7 @@
  */
 import {
   listAutomations,
-  saveAutomations,
+  patchAutomations,
   appendLog,
   nextRunAt,
   capRemainingUsd,
@@ -39,7 +39,12 @@ export async function runAutomations(opts: { allowSwaps: boolean }): Promise<Run
 
   const list = await listAutomations();
   const now = Date.now();
-  let changed = false;
+  // Fields the runner owns; applied to the live list at the end so a
+  // concurrent edit in the UI is never overwritten.
+  const patches = new Map<string, Partial<Automation>>();
+  const patch = (id: string, p: Partial<Automation>) => {
+    patches.set(id, { ...(patches.get(id) ?? {}), ...p });
+  };
 
   for (const a of list) {
     if (!a.enabled) continue;
@@ -47,9 +52,10 @@ export async function runAutomations(opts: { allowSwaps: boolean }): Promise<Run
 
     if (a.kind === 'alert') {
       const price = await getTokenPriceUsd(a.symbol).catch(() => null);
-      a.lastCheckedAt = new Date().toISOString();
-      if (price !== null) a.lastPriceUsd = price;
-      changed = true;
+      patch(a.id, {
+        lastCheckedAt: new Date().toISOString(),
+        ...(price !== null ? { lastPriceUsd: price } : {}),
+      });
 
       if (price === null) {
         report.skipped++;
@@ -59,8 +65,7 @@ export async function runAutomations(opts: { allowSwaps: boolean }): Promise<Run
 
       const hit = a.op === 'gt' ? price > a.valueUsd : price < a.valueUsd;
       if (hit && !a.triggered) {
-        a.triggered = true;
-        a.triggeredAt = new Date().toISOString();
+        patch(a.id, { triggered: true, triggeredAt: new Date().toISOString() });
         report.triggered++;
         report.details.push(`alert ${a.name}: ${a.symbol} ${price} ${a.op} ${a.valueUsd}`);
         await appendLog({
@@ -87,34 +92,37 @@ export async function runAutomations(opts: { allowSwaps: boolean }): Promise<Run
 
     const wallet = await getAutomationWallet();
     if (!wallet) {
-      a.lastRunAt = new Date().toISOString();
-      a.lastStatus = 'skipped';
-      a.lastMessage = 'no automation wallet';
-      a.nextRunAt = nextRunAt(a.everyMinutes, now);
+      patch(a.id, {
+        lastRunAt: new Date().toISOString(),
+        lastStatus: 'skipped',
+        lastMessage: 'no automation wallet',
+        nextRunAt: nextRunAt(a.everyMinutes, now),
+      });
       report.skipped++;
-      changed = true;
       continue;
     }
 
     const remaining = await capRemainingUsd();
     if (remaining <= 0) {
-      a.lastRunAt = new Date().toISOString();
-      a.lastStatus = 'skipped';
-      a.lastMessage = 'daily cap reached';
-      a.nextRunAt = nextRunAt(a.everyMinutes, now);
+      patch(a.id, {
+        lastRunAt: new Date().toISOString(),
+        lastStatus: 'skipped',
+        lastMessage: 'daily cap reached',
+        nextRunAt: nextRunAt(a.everyMinutes, now),
+      });
       report.skipped++;
-      changed = true;
       continue;
     }
 
     const unlocked = await unlockAutomationWallet();
     if (!unlocked) {
-      a.lastRunAt = new Date().toISOString();
-      a.lastStatus = 'skipped';
-      a.lastMessage = 'automation wallet unavailable';
-      a.nextRunAt = nextRunAt(a.everyMinutes, now);
+      patch(a.id, {
+        lastRunAt: new Date().toISOString(),
+        lastStatus: 'skipped',
+        lastMessage: 'automation wallet unavailable',
+        nextRunAt: nextRunAt(a.everyMinutes, now),
+      });
       report.skipped++;
-      changed = true;
       continue;
     }
 
@@ -130,32 +138,37 @@ export async function runAutomations(opts: { allowSwaps: boolean }): Promise<Run
       result = { ok: false, usdValue: 0, error: (e as Error).message };
     }
 
-    a.lastRunAt = new Date().toISOString();
-    a.nextRunAt = nextRunAt(a.everyMinutes, now);
+    const ranAt = new Date().toISOString();
+    const nextAt = nextRunAt(a.everyMinutes, now);
+    const message = result.ok
+      ? `${a.amount} ${a.fromToken} -> ${result.convertedAmount} ${a.toToken}`
+      : (result.error ?? 'swap failed');
+
+    patch(a.id, {
+      lastRunAt: ranAt,
+      nextRunAt: nextAt,
+      lastStatus: result.ok ? 'executed' : 'failed',
+      lastMessage: message,
+    });
 
     if (result.ok) {
-      a.lastStatus = 'executed';
-      a.lastMessage = `${a.amount} ${a.fromToken} -> ${result.convertedAmount} ${a.toToken}`;
       report.executed++;
       await recordSpend(Math.min(result.usdValue, MAX_AUTOMATION_USD));
-      report.details.push(`recurring ${a.name}: executed (${a.lastMessage})`);
+      report.details.push(`recurring ${a.name}: executed (${message})`);
     } else {
-      a.lastStatus = 'failed';
-      a.lastMessage = result.error ?? 'swap failed';
       report.failed++;
-      report.details.push(`recurring ${a.name}: failed (${a.lastMessage})`);
+      report.details.push(`recurring ${a.name}: failed (${message})`);
     }
 
     await appendLog({
       automationId: a.id,
       kind: 'recurring',
       status: result.ok ? 'executed' : 'failed',
-      message: a.lastMessage,
+      message,
     });
-    changed = true;
   }
 
-  if (changed) await saveAutomations(list);
+  await patchAutomations(patches);
   return report;
 }
 

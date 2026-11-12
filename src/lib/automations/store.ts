@@ -9,7 +9,7 @@
  * encrypted with a server-side key (AUTOMATION_KEY). The user funds that
  * wallet, so the blast radius of an automation is bounded by its balance.
  */
-import { dbRead, dbWrite } from '../db';
+import { dbRead, dbUpdate } from '../db';
 import { capSpent, addCapSpend, dailyCapUsd } from '../agent/safety';
 
 export type Automation =
@@ -59,28 +59,67 @@ export async function listAutomations(): Promise<Automation[]> {
   return (await dbRead<Automation[]>(KEY)) ?? [];
 }
 
-export async function saveAutomations(list: Automation[]): Promise<void> {
-  await dbWrite(KEY, list);
-}
-
 export async function upsertAutomation(a: Automation): Promise<Automation> {
-  const list = await listAutomations();
-  const idx = list.findIndex((x) => x.id === a.id);
-  if (idx >= 0) list[idx] = a;
-  else list.unshift(a);
-  await saveAutomations(list.slice(0, 100));
+  // Compare-and-set: the UI editing one automation must not drop another.
+  await dbUpdate<Automation[]>(KEY, (current) => {
+    const list = current ?? [];
+    const idx = list.findIndex((x) => x.id === a.id);
+    if (idx >= 0) list[idx] = a;
+    else list.unshift(a);
+    return list.slice(0, 100);
+  });
   return a;
 }
 
 export async function removeAutomation(id: string): Promise<void> {
-  const list = await listAutomations();
-  await saveAutomations(list.filter((x) => x.id !== id));
+  await dbUpdate<Automation[]>(KEY, (current) => (current ?? []).filter((x) => x.id !== id));
 }
 
 export async function appendLog(entry: Omit<AutomationLogEntry, 'id' | 'at'>): Promise<void> {
-  const log = (await dbRead<AutomationLogEntry[]>(LOG_KEY)) ?? [];
-  log.unshift({ ...entry, id: crypto.randomUUID(), at: new Date().toISOString() });
-  await dbWrite(LOG_KEY, log.slice(0, 200));
+  await dbUpdate<AutomationLogEntry[]>(LOG_KEY, (current) => {
+    const log = current ?? [];
+    log.unshift({ ...entry, id: crypto.randomUUID(), at: new Date().toISOString() });
+    return log.slice(0, 200);
+  });
+}
+
+/**
+ * Apply field-level patches to the stored automations.
+ *
+ * The runner works off a snapshot; writing that snapshot back would discard
+ * anything the user changed meanwhile (or vice versa). Patching only the
+ * fields the runner owns, compare-and-set, keeps both sides intact.
+ */
+export async function patchAutomations(patches: Map<string, Partial<Automation>>): Promise<void> {
+  if (patches.size === 0) return;
+  await dbUpdate<Automation[]>(KEY, (current) => {
+    const live = current ?? [];
+    for (const a of live) {
+      const p = patches.get(a.id);
+      if (p) Object.assign(a, p);
+    }
+    return live;
+  });
+}
+
+/**
+ * Patch a single automation. The caller supplies the values to set (not a
+ * toggle), so a retry after a conflict cannot flip the field twice.
+ */
+export async function patchAutomation(
+  id: string,
+  fields: Partial<Automation>,
+): Promise<Automation | null> {
+  let updated: Automation | null = null;
+  await dbUpdate<Automation[]>(KEY, (current) => {
+    const list = current ?? [];
+    const a = list.find((x) => x.id === id);
+    if (!a) return list;
+    Object.assign(a, fields);
+    updated = a;
+    return list;
+  });
+  return updated;
 }
 
 export async function listLog(limit = 50): Promise<AutomationLogEntry[]> {

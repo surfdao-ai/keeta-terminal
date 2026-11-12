@@ -10,7 +10,7 @@
 import { scryptSync, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import * as KeetaNet from '@keetanetwork/keetanet-client';
 import type { KeetaAccount } from '../keeta/network';
-import { dbRead, dbWrite } from '../db';
+import { dbRead, dbUpdate } from '../db';
 
 export interface StoredAutomationWallet {
   ciphertext: string;
@@ -41,25 +41,28 @@ export async function createAutomationWallet(): Promise<StoredAutomationWallet> 
   const existing = await getAutomationWallet();
   if (existing) return existing;
 
-  const seed = KeetaNet.lib.Account.generateRandomSeed({ asString: true });
-  const account = KeetaNet.lib.Account.fromSeed(seed, 0);
-  const address = account.publicKeyString.get();
+  // Compare-and-set: a concurrent creation cannot orphan the first wallet.
+  return dbUpdate<StoredAutomationWallet>('automationWallet', (current) => {
+    if (current) return current;
 
-  const salt = randomBytes(16);
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', scryptSync(key, salt, 32), iv);
-  const ct = Buffer.concat([cipher.update(seed, 'utf8'), cipher.final()]);
+    const seed = KeetaNet.lib.Account.generateRandomSeed({ asString: true });
+    const account = KeetaNet.lib.Account.fromSeed(seed, 0);
+    const address = account.publicKeyString.get();
 
-  const wallet: StoredAutomationWallet = {
-    ciphertext: ct.toString('base64'),
-    iv: iv.toString('base64'),
-    tag: cipher.getAuthTag().toString('base64'),
-    salt: salt.toString('base64'),
-    address,
-    createdAt: new Date().toISOString(),
-  };
-  await dbWrite('automationWallet', wallet);
-  return wallet;
+    const salt = randomBytes(16);
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', scryptSync(key, salt, 32), iv);
+    const ct = Buffer.concat([cipher.update(seed, 'utf8'), cipher.final()]);
+
+    return {
+      ciphertext: ct.toString('base64'),
+      iv: iv.toString('base64'),
+      tag: cipher.getAuthTag().toString('base64'),
+      salt: salt.toString('base64'),
+      address,
+      createdAt: new Date().toISOString(),
+    };
+  });
 }
 
 export async function unlockAutomationWallet(): Promise<{ account: KeetaAccount; address: string } | null> {

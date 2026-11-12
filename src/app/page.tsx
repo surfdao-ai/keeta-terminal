@@ -20,6 +20,8 @@ const PRESETS: { id: string; label: string; type: ProviderConfig['type']; baseUr
   { id: 'openrouter', label: 'OpenRouter', type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1', name: 'openrouter', defaultModel: 'openai/gpt-4o-mini' },
   { id: 'groq', label: 'Groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', name: 'groq', defaultModel: 'llama-3.3-70b-versatile' },
   { id: 'together', label: 'Together', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', name: 'together', defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
+  { id: 'ollama-cloud', label: 'Ollama Cloud', type: 'openai-compatible', baseUrl: 'https://ollama.com/v1', name: 'ollama-cloud', defaultModel: 'glm-5.3' },
+  { id: 'kilo', label: 'Kilo Gateway', type: 'openai-compatible', baseUrl: 'https://api.kilo.ai/api/gateway', name: 'kilo', defaultModel: 'kilo-auto/efficient' },
   { id: 'ollama', label: 'Ollama (local)', type: 'openai-compatible', baseUrl: 'http://localhost:11434/v1', name: 'ollama', defaultModel: 'llama3.1' },
   { id: 'lmstudio', label: 'LM Studio (local)', type: 'openai-compatible', baseUrl: 'http://localhost:1234/v1', name: 'lmstudio', defaultModel: 'local-model' },
   { id: 'custom', label: 'Custom (OpenAI-compatible)', type: 'openai-compatible', defaultModel: 'gpt-4o-mini' },
@@ -53,6 +55,9 @@ export default function Home() {
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('anthropic/claude-sonnet-4.5');
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState('');
 
   const [view, setView] = useState<View>('chat');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -210,22 +215,69 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [notice]);
 
+  /** Ask the provider which models it serves and offer them in a dropdown. */
+  async function loadModels(overrides?: { baseUrl?: string; apiKey?: string; presetId?: string }) {
+    const pid = overrides?.presetId ?? presetId;
+    const p = PRESETS.find((x) => x.id === pid);
+    if (!p || p.type !== 'openai-compatible') {
+      setModelOptions([]);
+      setModelsError('model listing needs an OpenAI-compatible provider');
+      return;
+    }
+    const url = (overrides?.baseUrl ?? baseUrl).trim() || p.baseUrl || '';
+    const key = (overrides?.apiKey ?? apiKey).trim();
+    if (!url) {
+      setModelsError('base URL required');
+      return;
+    }
+    setModelsLoading(true);
+    setModelsError('');
+    try {
+      const r = await fetch('/api/models', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ baseUrl: url, apiKey: key }),
+      });
+      const j = await r.json();
+      if (j.error) {
+        setModelOptions([]);
+        setModelsError(String(j.error));
+        return;
+      }
+      const list: string[] = Array.isArray(j.models) ? j.models : [];
+      setModelOptions(list);
+      if (list.length === 0) setModelsError('provider returned no models');
+    } catch (e) {
+      setModelsError((e as Error).message);
+    } finally {
+      setModelsLoading(false);
+    }
+  }
+
   function openSetup() {
     const c = cfg;
+    let p = PRESETS[0];
+    let b = '';
+    let k = '';
+    let m = p.defaultModel;
     if (c) {
-      const p = PRESETS.find((x) => x.baseUrl === c.baseUrl || (c.type === 'gateway' && x.id === 'vercel')) || PRESETS[0];
-      setPresetId(p.id);
-      setBaseUrl(c.baseUrl || p.baseUrl || '');
-      setApiKey(c.apiKey || '');
-      setModel(c.model);
+      p = PRESETS.find((x) => x.baseUrl === c.baseUrl || (c.type === 'gateway' && x.id === 'vercel')) || PRESETS[0];
+      b = c.baseUrl || p.baseUrl || '';
+      k = c.apiKey || '';
+      m = c.model;
     } else {
-      const p = PRESETS[0];
-      setPresetId(p.id);
-      setBaseUrl(p.baseUrl || '');
-      setApiKey('');
-      setModel(p.defaultModel);
+      b = p.baseUrl || '';
     }
+    setPresetId(p.id);
+    setBaseUrl(b);
+    setApiKey(k);
+    setModel(m);
+    setModelOptions([]);
+    setModelsError('');
     setSetupOpen(true);
+    if (p.type === 'openai-compatible') {
+      void loadModels({ baseUrl: b, apiKey: k, presetId: p.id });
+    }
   }
 
   function saveSetup(e: React.FormEvent) {
@@ -295,16 +347,16 @@ export default function Home() {
   return (
     <div className="flex h-[100dvh] bg-[#09090B] text-[#F7F7F7]">
       {/* mobile top bar */}
-      <div className="md:hidden fixed top-0 inset-x-0 z-30 h-12 flex items-center gap-3 px-3 bg-[#141416]/95 backdrop-blur border-b border-zinc-800/80 pt-[env(safe-area-inset-top)]">
+      <div className="md:hidden fixed top-0 inset-x-0 z-50 h-[var(--kt-header-h)] flex items-center gap-3 px-3 bg-[#101012] backdrop-blur border-b border-zinc-700/80 pt-[env(safe-area-inset-top,0px)] shadow-[0_2px_12px_rgba(0,0,0,0.65)]">
         <button
           onClick={() => setNavOpen(!navOpen)}
           aria-label="Toggle navigation"
-          className="w-9 h-9 flex items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 active:bg-zinc-800"
+          className="w-10 h-10 flex items-center justify-center rounded-lg border border-zinc-600 bg-[#1c1c21] text-[17px] text-zinc-100 active:bg-zinc-700 shrink-0"
         >
           ☰
         </button>
-        <span className="font-mono text-[13px] font-semibold">kterminal</span>
-        <span className="ml-auto font-mono text-[10px] text-zinc-500 truncate max-w-[45%]">
+        <span className="font-mono text-[14px] font-semibold text-zinc-100">kterminal</span>
+        <span className="ml-auto font-mono text-[11px] text-zinc-400 truncate max-w-[45%]">
           {unlock.unlocked ? 'wallet unlocked' : 'wallet locked'}
         </span>
       </div>
@@ -319,7 +371,7 @@ export default function Home() {
 
       {/* sidebar */}
       <aside
-        className={`${sidebarOpen ? 'md:w-[250px]' : 'md:w-16'} w-[250px] shrink-0 border-r border-zinc-800/80 bg-[#141416] flex flex-col transition-all duration-200 fixed md:static inset-y-0 left-0 z-40 md:z-auto pt-12 md:pt-0 ${navOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
+        className={`${sidebarOpen ? 'md:w-[250px]' : 'md:w-16'} w-[250px] shrink-0 border-r border-zinc-800/80 bg-[#141416] flex flex-col transition-all duration-200 fixed md:static inset-y-0 left-0 z-40 md:z-auto pt-[var(--kt-header-h)] md:pt-0 ${navOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       >
         <div className="h-14 flex items-center px-4 border-b border-zinc-800/80 gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-600 to-indigo-800 flex items-center justify-center font-bold text-white text-sm shrink-0">K</div>
@@ -410,7 +462,7 @@ export default function Home() {
       </aside>
 
       {/* main */}
-      <main className="flex-1 flex flex-col min-w-0 bg-[#09090B] pt-12 md:pt-0">
+      <main className="flex-1 flex flex-col min-w-0 bg-[#09090B] pt-[var(--kt-header-h)] md:pt-0">
         {view === 'chat' && (
           <ChatPanel
             key={activeChatId}
@@ -588,9 +640,19 @@ export default function Home() {
                   type="button"
                   key={p.id}
                   onClick={() => {
+                    const sameProvider = baseUrl.trim() === (p.baseUrl || '');
                     setPresetId(p.id);
                     setBaseUrl(p.baseUrl || '');
                     setModel(p.defaultModel);
+                    setModelOptions([]);
+                    setModelsError('');
+                    if (p.type === 'openai-compatible') {
+                      void loadModels({
+                        baseUrl: p.baseUrl || '',
+                        apiKey: sameProvider ? apiKey : '',
+                        presetId: p.id,
+                      });
+                    }
                   }}
                   className={`px-3 py-2.5 rounded-xl border text-sm font-medium text-left transition ${
                     presetId === p.id
@@ -615,10 +677,49 @@ export default function Home() {
                 </label>
               </div>
             )}
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-zinc-400">Model</span>
-              <input value={model} onChange={(e) => setModel(e.target.value)} className="px-3 py-2.5 rounded-lg bg-[#09090B] border border-zinc-700 focus:outline-none focus:border-purple-600" />
-            </label>
+
+            <div className="flex flex-col gap-1.5 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-zinc-400">Model</span>
+                {preset.type === 'openai-compatible' && (
+                  <button
+                    type="button"
+                    onClick={() => void loadModels()}
+                    disabled={modelsLoading}
+                    className="font-mono text-[11px] px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:border-purple-600 hover:text-white disabled:opacity-50"
+                  >
+                    {modelsLoading ? 'loading…' : 'load models'}
+                  </button>
+                )}
+              </div>
+
+              {modelOptions.length > 0 && (
+                <select
+                  value={modelOptions.includes(model) ? model : ''}
+                  onChange={(e) => setModel(e.target.value)}
+                  className="px-3 py-2.5 rounded-lg bg-[#09090B] border border-zinc-700 focus:outline-none focus:border-purple-600"
+                >
+                  <option value="">select a model…</option>
+                  {modelOptions.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              <input
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="model id (e.g. anthropic/claude-sonnet-4.5)"
+                className="px-3 py-2.5 rounded-lg bg-[#09090B] border border-zinc-700 focus:outline-none focus:border-purple-600 font-mono text-[13px]"
+              />
+
+              {modelsError && <p className="text-[11px] text-amber-400 font-mono">{modelsError}</p>}
+              {modelOptions.length > 0 && (
+                <p className="text-[11px] text-zinc-600 font-mono">{modelOptions.length} models available</p>
+              )}
+            </div>
             <div className="flex gap-2 justify-end pt-2">
               {cfg && <button type="button" onClick={() => { clearSetup(); }} className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm">Clear</button>}
               <button type="button" onClick={() => setSetupOpen(false)} className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm">Cancel</button>

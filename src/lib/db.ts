@@ -11,11 +11,17 @@
  * different store. On Vercel we therefore fail loudly instead of silently
  * falling back to the file.
  *
+ * Every backend supports compare-and-set: a writer states the revision it
+ * read, and the write only lands if nothing changed in between. That is what
+ * makes read-modify-write safe when the cron tick and the UI write to the
+ * same list at the same time — see dbUpdate().
+ *
  * Stored keys:
  *   wallet      — { seedCiphertext, seedIv, seedTag, salt, address, createdAt }
  *   trades      — array of executed trades (append-only log)
  *   cap:<date>  — { spentUsd } daily cap counter, keyed by UTC date
  *   automations — list of price alerts / recurring swaps
+ *   chats       — saved chat history
  */
 import { promises as fs, accessSync, constants } from 'node:fs';
 import path from 'node:path';
@@ -26,35 +32,69 @@ const BLOB_PREFIX = 'kt-kv';
 
 type KV = Record<string, unknown>;
 
-interface FileDB {
-  read(key: string): Promise<unknown | null>;
-  write(key: string, value: unknown): Promise<void>;
+/** A stored value together with the revision it was read at. */
+export interface KVEntry<T = unknown> {
+  value: T | null;
+  rev: string | null;
 }
 
-const fileDB: FileDB = {
-  async read(key) {
+/** Raised when another writer changed the key since it was read. */
+export class StoreConflictError extends Error {
+  constructor(key: string) {
+    super(`Concurrent modification of "${key}"`);
+    this.name = 'StoreConflictError';
+  }
+}
+
+interface KVBackend {
+  read<T>(key: string): Promise<KVEntry<T>>;
+  /** Compare-and-set: write only if the stored revision is still `expectedRev`. */
+  write<T>(key: string, value: T, expectedRev: string | null): Promise<string | null>;
+  /** Unconditional overwrite (last writer wins). */
+  overwrite<T>(key: string, value: T): Promise<void>;
+}
+
+/* ------------------------------------------------------------------ *
+ * File backend (development only)
+ * ------------------------------------------------------------------ */
+
+async function writeFileKey(key: string, value: unknown): Promise<void> {
+  let parsed: KV = {};
+  try {
+    parsed = (JSON.parse(await fs.readFile(DATA_FILE, 'utf8')) as KV) ?? {};
+  } catch {
+    /* first write */
+  }
+  parsed[key] = value;
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(DATA_FILE, JSON.stringify(parsed, null, 2));
+}
+
+const fileDB: KVBackend = {
+  async read<T>(key: string) {
     try {
       const raw = await fs.readFile(DATA_FILE, 'utf8');
       const parsed = JSON.parse(raw) as KV;
-      return parsed[key] ?? null;
+      return { value: (parsed[key] ?? null) as T | null, rev: null };
     } catch {
-      return null;
+      return { value: null as T | null, rev: null };
     }
   },
-  async write(key, value) {
-    let parsed: KV = {};
-    try {
-      parsed = (JSON.parse(await fs.readFile(DATA_FILE, 'utf8')) as KV) ?? {};
-    } catch {
-      /* first write */
-    }
-    parsed[key] = value;
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(DATA_FILE, JSON.stringify(parsed, null, 2));
+  async write<T>(key: string, value: T) {
+    // Single-process dev store: there is no revision to compare against.
+    await writeFileKey(key, value);
+    return null;
+  },
+  async overwrite<T>(key: string, value: T) {
+    await writeFileKey(key, value);
   },
 };
 
-interface PgDB extends FileDB {
+/* ------------------------------------------------------------------ *
+ * Postgres backend
+ * ------------------------------------------------------------------ */
+
+interface PgDB extends KVBackend {
   sql: unknown;
 }
 
@@ -73,17 +113,35 @@ async function getPostgres(): Promise<PgDB> {
         // Pooler-safe: no server-side prepared statements.
         prepare: false,
       });
-      await sql`CREATE TABLE IF NOT EXISTS kt_store (key text primary key, value jsonb not null, updated timestamptz not null default now())`;
+      await sql`CREATE TABLE IF NOT EXISTS kt_store (key text primary key, value jsonb not null, rev integer not null default 0, updated timestamptz not null default now())`;
+      // Deployments before the revision column existed still have rows.
+      await sql`ALTER TABLE kt_store ADD COLUMN IF NOT EXISTS rev integer not null default 0`;
       return {
         sql,
-        async read(key) {
-          const rows = await sql`SELECT value FROM kt_store WHERE key = ${key}`;
-          return (rows[0] as { value: unknown } | undefined)?.value ?? null;
+        async read<T>(key: string) {
+          const rows = await sql`SELECT value, rev FROM kt_store WHERE key = ${key}`;
+          const row = rows[0] as { value: unknown; rev: number } | undefined;
+          return { value: (row?.value ?? null) as T | null, rev: row ? String(row.rev) : null };
         },
-        async write(key, value) {
-          await sql`INSERT INTO kt_store (key, value) VALUES (${key}, ${sql.json(
+        async write<T>(key: string, value: T, expectedRev: string | null) {
+          if (expectedRev === null) {
+            // Create only when the key is still absent.
+            const res = await sql`INSERT INTO kt_store (key, value, rev) VALUES (${key}, ${sql.json(
+              value as object,
+            )}, 1) ON CONFLICT (key) DO NOTHING`;
+            if (res.count === 0) throw new StoreConflictError(key);
+            return '1';
+          }
+          const res = await sql`UPDATE kt_store SET value = ${sql.json(
             value as object,
-          )}) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated = now()`;
+          )}, rev = rev + 1, updated = now() WHERE key = ${key} AND rev = ${Number(expectedRev)}`;
+          if (res.count === 0) throw new StoreConflictError(key);
+          return String(Number(expectedRev) + 1);
+        },
+        async overwrite<T>(key: string, value: T) {
+          await sql`INSERT INTO kt_store (key, value, rev) VALUES (${key}, ${sql.json(
+            value as object,
+          )}, 1) ON CONFLICT (key) DO UPDATE SET value = excluded.value, rev = kt_store.rev + 1, updated = now()`;
         },
       };
     })();
@@ -116,28 +174,57 @@ function isBlobNotFound(e: unknown): boolean {
   return name === 'BlobNotFoundError' || /not found/i.test(msg);
 }
 
-const blobDB: FileDB = {
-  async read(key) {
+/** The write did not land because someone else changed the object first. */
+function isBlobConflict(e: unknown): boolean {
+  const name = (e as { name?: string })?.name ?? '';
+  const msg = (e as { message?: string })?.message ?? '';
+  return (
+    name === 'BlobPreconditionFailedError' ||
+    /already exists/i.test(msg) ||
+    /precondition/i.test(msg)
+  );
+}
+
+const blobDB: KVBackend = {
+  async read<T>(key: string) {
     const { get } = await import('@vercel/blob');
     try {
+      // Pin the same store the writer uses; never fall back to OIDC/store-id
+      // resolution, which could point at a different store than the token.
+      // useCache: false reads from origin storage — the CDN copy of an
+      // overwritten object is stale for a short while.
       const res = await get(blobPath(key), {
         access: 'private',
-        // Pin the same store the writer uses; never fall back to OIDC/store-id
-        // resolution, which could point at a different store than the token.
         token: process.env.BLOB_READ_WRITE_TOKEN,
-        // Read from origin storage: the CDN copy of an overwritten object is
-        // stale for a short while, which would break read-after-write.
         useCache: false,
       });
-      if (!res || res.statusCode !== 200) return null;
+      if (!res || res.statusCode !== 200) return { value: null as T | null, rev: null };
       const text = await new Response(res.stream).text();
-      return JSON.parse(text) as unknown;
+      return { value: JSON.parse(text) as T, rev: res.blob.etag };
     } catch (e) {
-      if (isBlobNotFound(e)) return null;
+      if (isBlobNotFound(e)) return { value: null as T | null, rev: null };
       throw e;
     }
   },
-  async write(key, value) {
+  async write<T>(key: string, value: T, expectedRev: string | null) {
+    const { put } = await import('@vercel/blob');
+    try {
+      const res = await put(blobPath(key), JSON.stringify(value), {
+        access: 'private',
+        contentType: 'application/json',
+        addRandomSuffix: false,
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+        // With a known revision the write is conditional; without one the
+        // write must fail if the object appeared in the meantime.
+        ...(expectedRev ? { ifMatch: expectedRev } : { allowOverwrite: false }),
+      });
+      return res.etag;
+    } catch (e) {
+      if (isBlobConflict(e)) throw new StoreConflictError(key);
+      throw e;
+    }
+  },
+  async overwrite<T>(key: string, value: T) {
     const { put } = await import('@vercel/blob');
     await put(blobPath(key), JSON.stringify(value), {
       access: 'private',
@@ -178,7 +265,8 @@ function isRuntimeWritable(): boolean {
 
 /**
  * KV_BACKEND pins the backend (postgres | blob | file). Unset means
- * auto-detect: Postgres, then Blob, then the local file store.
+ * auto-detect: Postgres, then Blob (on Vercel, where the store is connected
+ * with OIDC credentials), then the local file store.
  */
 function selectedBackend(): BackendName {
   const forced = process.env.KV_BACKEND?.trim().toLowerCase();
@@ -189,7 +277,7 @@ function selectedBackend(): BackendName {
   return 'file';
 }
 
-async function backend(): Promise<FileDB> {
+async function backend(): Promise<KVBackend> {
   const name = selectedBackend();
   if (name === 'postgres') return getPostgres();
   if (name === 'blob') return blobDB;
@@ -205,10 +293,43 @@ async function backend(): Promise<FileDB> {
 
 export async function dbRead<T = unknown>(key: string): Promise<T | null> {
   const db = await backend();
-  return (await db.read(key)) as T | null;
+  return (await db.read<T>(key)).value;
 }
 
 export async function dbWrite(key: string, value: unknown): Promise<void> {
   const db = await backend();
-  await db.write(key, value);
+  await db.overwrite(key, value);
+}
+
+/**
+ * Read-modify-write with optimistic concurrency.
+ *
+ * `mutate` receives the current value and returns the new one. If another
+ * writer changed the key in between, the write is rejected and the whole
+ * read-modify-write is retried against the fresh value — so a concurrent
+ * update is never silently lost.
+ *
+ * `mutate` may run more than once and must therefore be side-effect free.
+ */
+export async function dbUpdate<T>(
+  key: string,
+  mutate: (current: T | null) => T | Promise<T>,
+  opts?: { attempts?: number },
+): Promise<T> {
+  const attempts = opts?.attempts ?? 6;
+  const db = await backend();
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const { value, rev } = await db.read<T>(key);
+    const next = await mutate(value);
+    try {
+      await db.write(key, next, rev);
+      return next;
+    } catch (e) {
+      if (!(e instanceof StoreConflictError)) throw e;
+      // Someone else wrote first — back off and retry against their value.
+      await new Promise((r) => setTimeout(r, 25 * (attempt + 1) + Math.random() * 30));
+    }
+  }
+  throw new Error(`Could not update "${key}" after ${attempts} attempts (concurrent writes).`);
 }

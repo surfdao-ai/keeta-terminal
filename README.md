@@ -38,6 +38,12 @@ see a different store. Set `KV_BACKEND=postgres|blob|file` to pin one explicitly
 Because Blob objects are served through a CDN, reads use `useCache: false` —
 otherwise a freshly written value is invisible for a short while.
 
+Writes are compare-and-set: a writer states the revision it read and the write
+only lands if nothing changed in between, so `dbUpdate()` retries instead of
+silently dropping a concurrent change. That is what keeps the daily spend cap
+and the automation list honest when the cron tick and the UI write at the same
+time.
+
 ```bash
 vercel storage create kt-kv --type blob --access private
 vercel storage connect kt-kv --auth oidc
@@ -58,13 +64,21 @@ npm run dev
 
 On first load the terminal shows a **Model setup** dialog. Pick a provider and paste your key:
 
-- Vercel AI Gateway (uses server key / OIDC, or your own key)
+- Vercel AI Gateway (uses server key / OIDC, or your own key) — *needs a credit card on the Vercel account*
 - OpenRouter
 - Groq
 - Together
+- Ollama Cloud (`https://ollama.com/v1`, key from ollama.com/settings/keys)
+- Kilo Gateway (`https://api.kilo.ai/api/gateway`, key from app.kilo.ai)
 - Ollama (local)
 - LM Studio (local)
 - Custom OpenAI-compatible endpoint
+
+Pick a provider and the dialog loads the models that endpoint actually serves
+(`GET {baseUrl}/models`, proxied through `/api/models`) and offers them in a
+dropdown — type a model id by hand if it is not listed. The list is fetched
+server-side, so provider CORS rules do not matter and the key stays in the
+browser.
 
 The key is stored only in your browser (localStorage) and sent per request — never persisted server-side. You can reopen setup anytime via the "Model setup" button.
 

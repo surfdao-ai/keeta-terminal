@@ -1,7 +1,7 @@
 /**
  * Safety rails for mainnet: pending actions, daily cap, quote revalidation.
  */
-import { dbRead, dbWrite } from '../db';
+import { dbRead, dbUpdate } from '../db';
 
 export interface TokenLaunchSpec {
   name: string;
@@ -40,14 +40,17 @@ export async function loadPending(id: string): Promise<PendingTrade | null> {
 }
 
 export async function savePending(t: PendingTrade): Promise<void> {
-  const all = (await dbRead<PendingTrade[]>('pendingTrades')) ?? [];
-  all.unshift(t);
-  await dbWrite('pendingTrades', all.slice(0, 50));
+  await dbUpdate<PendingTrade[]>('pendingTrades', (current) => {
+    const all = current ?? [];
+    all.unshift(t);
+    return all.slice(0, 50);
+  });
 }
 
 export async function removePending(id: string): Promise<void> {
-  const all = (await dbRead<PendingTrade[]>('pendingTrades')) ?? [];
-  await dbWrite('pendingTrades', all.filter((t) => t.id !== id));
+  await dbUpdate<PendingTrade[]>('pendingTrades', (current) =>
+    (current ?? []).filter((t) => t.id !== id),
+  );
 }
 
 export interface TradeRecord {
@@ -68,9 +71,11 @@ export interface TradeRecord {
 }
 
 export async function appendTrade(r: TradeRecord): Promise<void> {
-  const all = (await dbRead<TradeRecord[]>('trades')) ?? [];
-  all.unshift(r);
-  await dbWrite('trades', all.slice(0, 500));
+  await dbUpdate<TradeRecord[]>('trades', (current) => {
+    const all = current ?? [];
+    all.unshift(r);
+    return all.slice(0, 500);
+  });
 }
 
 export async function listTrades(limit = 50): Promise<TradeRecord[]> {
@@ -89,8 +94,11 @@ export async function capSpent(): Promise<number> {
 
 export async function addCapSpend(usd: number): Promise<void> {
   const key = await capKey();
-  const cur = await dbRead<{ spentUsd: number }>(key);
-  await dbWrite(key, { spentUsd: (cur?.spentUsd ?? 0) + usd });
+  // Compare-and-set: two concurrent trades must both be counted against the
+  // cap, otherwise the daily limit could be exceeded.
+  await dbUpdate<{ spentUsd: number }>(key, (current) => ({
+    spentUsd: (current?.spentUsd ?? 0) + usd,
+  }));
 }
 
 export interface TerminalSettings {
@@ -122,6 +130,6 @@ export async function setDailyCap(usd: number): Promise<TerminalSettings> {
   if (!Number.isFinite(usd) || usd <= 0) throw new Error('Cap must be a positive number');
   if (usd > MAX_CAP_USD) throw new Error(`Cap cannot exceed $${MAX_CAP_USD.toLocaleString()}`);
   const settings: TerminalSettings = { dailyCapUsd: usd, updatedAt: new Date().toISOString() };
-  await dbWrite('settings', settings);
+  await dbUpdate<TerminalSettings>('settings', () => settings);
   return settings;
 }

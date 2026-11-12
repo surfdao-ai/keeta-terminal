@@ -46,7 +46,7 @@ export default function ChatPanel({
     }),
   });
 
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, status, error } = useChat({
     transport,
     messages: initialMessages,
     onFinish: ({ messages: finished }) => {
@@ -182,10 +182,18 @@ export default function ChatPanel({
                     </span>
                   </div>
                 )}
-                {!loading && (
+                {!loading && !error && (
                   <div className="flex gap-2">
                     <span className="text-purple-400 select-none">&gt;</span>
                     <span className="inline-block w-2 h-4 bg-purple-500 animate-pulse align-middle" />
+                  </div>
+                )}
+                {error && (
+                  <div className="flex gap-2">
+                    <span className="text-red-500 select-none">!</span>
+                    <span className="text-red-400 whitespace-pre-wrap break-words">
+                      {error.message}
+                    </span>
                   </div>
                 )}
               </div>

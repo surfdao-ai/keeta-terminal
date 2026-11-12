@@ -13,9 +13,12 @@ export interface ProviderConfig {
 const PRESETS: Record<string, { baseUrl: string; name: string }> = {
   openrouter: { baseUrl: 'https://openrouter.ai/api/v1', name: 'openrouter' },
   ollama: { baseUrl: 'http://localhost:11434/v1', name: 'ollama' },
+  'ollama-cloud': { baseUrl: 'https://ollama.com/v1', name: 'ollama-cloud' },
   lmstudio: { baseUrl: 'http://localhost:1234/v1', name: 'lmstudio' },
   groq: { baseUrl: 'https://api.groq.com/openai/v1', name: 'groq' },
   together: { baseUrl: 'https://api.together.xyz/v1', name: 'together' },
+  kilo: { baseUrl: 'https://api.kilo.ai/api/gateway', name: 'kilo' },
+  vercel: { baseUrl: 'https://ai-gateway.vercel.sh/v1', name: 'vercel' },
 };
 
 export function resolveBaseUrl(cfg: ProviderConfig): string | undefined {

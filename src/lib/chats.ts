@@ -6,7 +6,7 @@
  * are derived from the first user message.
  */
 import type { UIMessage } from 'ai';
-import { dbRead, dbWrite } from './db';
+import { dbRead, dbUpdate } from './db';
 
 export interface SavedChat {
   id: string;
@@ -30,18 +30,20 @@ export async function getChat(id: string): Promise<SavedChat | null> {
 }
 
 export async function saveChat(chat: SavedChat): Promise<SavedChat> {
-  const chats = (await dbRead<SavedChat[]>(KEY)) ?? [];
-  const idx = chats.findIndex((c) => c.id === chat.id);
   const record: SavedChat = { ...chat, updatedAt: new Date().toISOString() };
-  if (idx >= 0) chats[idx] = record;
-  else chats.unshift(record);
-  await dbWrite(KEY, chats.slice(0, MAX_CHATS));
+  // Compare-and-set: a concurrent save of a different chat is not lost.
+  await dbUpdate<SavedChat[]>(KEY, (current) => {
+    const chats = current ?? [];
+    const idx = chats.findIndex((c) => c.id === record.id);
+    if (idx >= 0) chats[idx] = record;
+    else chats.unshift(record);
+    return chats.slice(0, MAX_CHATS);
+  });
   return record;
 }
 
 export async function deleteChat(id: string): Promise<void> {
-  const chats = (await dbRead<SavedChat[]>(KEY)) ?? [];
-  await dbWrite(KEY, chats.filter((c) => c.id !== id));
+  await dbUpdate<SavedChat[]>(KEY, (current) => (current ?? []).filter((c) => c.id !== id));
 }
 
 /** Derive a short title from the first user message. */

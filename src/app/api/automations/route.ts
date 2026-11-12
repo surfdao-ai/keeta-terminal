@@ -3,6 +3,7 @@ import { getSession } from '@/lib/agent/session';
 import {
   listAutomations,
   upsertAutomation,
+  patchAutomation,
   removeAutomation,
   listLog,
   nextRunAt,
@@ -43,9 +44,9 @@ export async function POST(req: Request) {
     const list = await listAutomations();
     const a = list.find((x) => x.id === body.id);
     if (!a) return NextResponse.json({ error: 'Automation not found.' }, { status: 404 });
-    a.enabled = !a.enabled;
-    await upsertAutomation(a);
-    return NextResponse.json({ ok: true, automation: a });
+    // Compute the target state first so a conflict retry cannot flip twice.
+    const updated = await patchAutomation(a.id, { enabled: !a.enabled });
+    return NextResponse.json({ ok: true, automation: updated ?? a });
   }
 
   // create

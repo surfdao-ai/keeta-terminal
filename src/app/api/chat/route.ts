@@ -3,6 +3,7 @@ import {
   streamText,
   UIMessage,
   convertToModelMessages,
+  createUIMessageStream,
   createUIMessageStreamResponse,
   toUIMessageStream,
   gateway,
@@ -90,6 +91,19 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: (e as Error).message }), { status: 400, headers: { 'content-type': 'application/json' } });
   }
 
+  // The Vercel AI Gateway is only usable with a credit card on the account.
+  // Without a provider of our own there is nothing to talk to, so say so
+  // instead of failing later with an opaque 403.
+  if (!body.providerConfig && !process.env.AI_GATEWAY_API_KEY) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'No model configured. Open "Model setup" and pick a provider — Ollama Cloud, Kilo Gateway, OpenRouter, Groq or Together all work without a Vercel credit card.',
+      }),
+      { status: 400, headers: { 'content-type': 'application/json' } },
+    );
+  }
+
   const tools: ToolSet = buildTools({ passphrase }) as ToolSet;
 
   const mcpUrl = process.env.KEESPECS_MCP_URL || 'https://keespecs.xyz/mcp';
@@ -119,7 +133,35 @@ export async function POST(req: Request) {
     },
   });
 
-  return createUIMessageStreamResponse({
-    stream: toUIMessageStream({ stream: result.stream }),
+  // onError lives on the stream (not the response): it replaces the default
+  // "An error occurred." with the real reason.
+  const uiStream = createUIMessageStream({
+    execute: async ({ writer }) => {
+      writer.merge(toUIMessageStream({ stream: result.stream }));
+    },
+    onError: (error) => friendlyModelError(error),
   });
+
+  return createUIMessageStreamResponse({ stream: uiStream });
+}
+
+/**
+ * Turn provider failures into something actionable. The default AI SDK
+ * message ("An error occurred.") hides the reason — which matters most for
+ * the gateway, where the real cause is a billing requirement.
+ */
+function friendlyModelError(error: unknown): string {
+  const err = error as { name?: string; message?: string; statusCode?: number; cause?: { message?: string } };
+  const blob = `${err?.name ?? ''} ${err?.message ?? ''} ${err?.cause?.message ?? ''}`;
+
+  if (/credit card|customer_verification_required|credits/i.test(blob)) {
+    return 'Vercel AI Gateway needs a credit card on the account. Open "Model setup" and switch to a provider that does not need one (Ollama Cloud, Kilo Gateway, OpenRouter, Groq, Together).';
+  }
+  if (/ai gateway|gateway/i.test(blob) && err?.statusCode === 403) {
+    return 'Vercel AI Gateway refused the request (403). Open "Model setup" and switch to a provider that does not need a credit card.';
+  }
+  if (/api key|unauthorized|401/i.test(blob)) {
+    return 'Provider rejected the API key. Open "Model setup" and check the key.';
+  }
+  return `Model request failed: ${err?.message ?? 'unknown error'}`;
 }

@@ -5,6 +5,11 @@
   --foreground: #F7F7F7;
   --sidebar: #141416;
   --accent: #4C1D95;
+  /*
+   * Mobile header height. It must clear the iPhone status bar / Dynamic
+   * Island, which env(safe-area-inset-top) reports in standalone PWA mode.
+   */
+  --kt-header-h: calc(3rem + env(safe-area-inset-top, 0px));
 }
 
 @theme inline {
