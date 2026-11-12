@@ -17,6 +17,8 @@ interface ChatPanelProps {
   chatId: string;
   initialMessages: UIMessage[];
   providerConfig: PanelProviderConfig | null;
+  /** The wallet seed, sent with the request that needs a signature. */
+  seed: string | null;
   cap: { spentUsd: number; capUsd: number } | null;
   unlocked: boolean;
   address: string | null;
@@ -29,6 +31,7 @@ export default function ChatPanel({
   chatId,
   initialMessages,
   providerConfig,
+  seed,
   cap,
   unlocked,
   address,
@@ -42,7 +45,11 @@ export default function ChatPanel({
   const transport = new DefaultChatTransport({
     api: '/api/chat',
     prepareSendMessagesRequest: ({ messages }) => ({
-      body: { messages, providerConfig: providerConfig ?? undefined },
+      body: {
+        messages,
+        providerConfig: providerConfig ?? undefined,
+        seed: seed ?? undefined,
+      },
     }),
   });
 

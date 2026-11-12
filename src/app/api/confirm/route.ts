@@ -1,17 +1,14 @@
 import { NextResponse } from 'next/server';
 import { userClient, loadFXClient, toDisplay, fromDisplay, getTokenInfo } from '@/lib/keeta/network';
-import { getSession } from '@/lib/agent/session';
 import { loadPending, removePending, appendTrade, capSpent, addCapSpend, dailyCapUsd, isExpired } from '@/lib/agent/safety';
-import { unlockWallet } from '@/lib/keeta/wallet';
+import { accountFromSeed } from '@/lib/keeta/wallet';
 import { launchToken } from '@/lib/keeta/tokens';
 
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as { tradeId?: string };
-  const cookie = req.headers.get('cookie') ?? '';
-  const sid = cookie.match(/kt_sid=([^;]+)/)?.[1];
-  const session = getSession(sid);
-  if (!session) return NextResponse.json({ error: 'Wallet locked.' }, { status: 401 });
+  const body = (await req.json()) as { tradeId?: string; seed?: string };
+  const seed = typeof body.seed === 'string' && body.seed.trim() ? body.seed.trim() : null;
+  if (!seed) return NextResponse.json({ error: 'Wallet locked.' }, { status: 401 });
 
   const tradeId = body.tradeId;
   if (!tradeId) return NextResponse.json({ error: 'tradeId required' }, { status: 400 });
@@ -24,7 +21,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { account } = await unlockWallet(session.passphrase);
+    const { account } = accountFromSeed(seed);
     const { fromToken: from, toToken: to, amount, affinity } = pending;
 
     // ---- token launch path (native tokenization, no contract) ----

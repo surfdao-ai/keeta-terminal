@@ -71,8 +71,7 @@ interface TokenInfoLite {
 }
 
 /** Read token metadata + supply for a token address (read-only client). */
-export async function getTokenInfo(address: string): Promise<TokenInfoLite> {
-  await using client = KeetaNet.Client.fromNetwork(networkAlias());
+export async function getTokenInfo(address: string): Promise<TokenInfoLite> {  await using client = KeetaNet.Client.fromNetwork(networkAlias());
   const info = (await client.getAccountInfo(address)) as {
     info?: { name?: string; description?: string; metadata?: string };
     supply?: bigint;
@@ -128,4 +127,39 @@ export type FXClient = InstanceType<typeof KeetaAnchor.FX.Client>;
 export async function loadFXClient(client: KeetaUserClient): Promise<FXClient> {
   const anchor = await import('@keetanetwork/anchor');
   return new anchor.FX.Client(client, { root: client.networkAddress }) as unknown as FXClient;
+}
+
+export interface BalanceRow {
+  token: string;
+  raw: string;
+  display: string;
+  decimals: number | null;
+}
+
+/**
+ * All token balances of an account, with display amounts.
+ *
+ * Requires a signing account: the Keeta user client signs balance reads.
+ */
+export async function readBalances(account: KeetaAccount): Promise<BalanceRow[]> {
+  await using client = userClient(account);
+  const balances = await client.allBalances();
+  return Promise.all(
+    balances.map(async (b) => {
+      const token = b.token.publicKeyString.get();
+      let decimals: number | null = null;
+      try {
+        const info = await getTokenInfo(token);
+        decimals = info.decimals;
+      } catch {
+        decimals = null;
+      }
+      return {
+        token,
+        raw: b.balance.toString(),
+        display: toDisplay(b.balance, decimals),
+        decimals,
+      };
+    }),
+  );
 }

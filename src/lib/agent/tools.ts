@@ -1,13 +1,14 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import * as KeetaNet from '@keetanetwork/keetanet-client';
-import { networkAlias, userClient, loadFXClient, toDisplay, fromDisplay, getTokenInfo, summarizeQuote, normalizeToken } from '../keeta/network';
-import { unlockWallet } from '../keeta/wallet';
+import { networkAlias, userClient, loadFXClient, fromDisplay, getTokenInfo, readBalances, summarizeQuote, normalizeToken } from '../keeta/network';
+import { accountFromSeed } from '../keeta/wallet';
 import { newPendingTrade, savePending, listTrades, capSpent, dailyCapUsd } from './safety';
 import { validateTokenSpec } from '../keeta/tokens';
 
 export interface ToolContext {
-  passphrase: string | null; // null = locked
+  /** The wallet seed, sent by the browser for this request only. null = locked. */
+  seed: string | null;
 }
 
 function locked() {
@@ -21,30 +22,10 @@ export function buildTools(ctx: ToolContext) {
         'Get the trading account address, base token, and all balances with display amounts. Requires an unlocked wallet.',
       inputSchema: z.object({}),
       execute: async () => {
-        if (!ctx.passphrase) return locked();
-        const { account, address } = await unlockWallet(ctx.passphrase);
-        await using client = userClient(account);
-        const balances = await client.allBalances();
-        // resolve decimals per token
-        const rows = await Promise.all(
-          balances.map(async (b) => {
-            const addr = b.token.publicKeyString.get();
-            let decimals: number | null = null;
-            try {
-              const info = await getTokenInfo(addr);
-              decimals = info.decimals;
-            } catch {
-              decimals = null;
-            }
-            return {
-              token: addr,
-              raw: b.balance.toString(),
-              display: toDisplay(b.balance, decimals),
-              decimals,
-            };
-          }),
-        );
-        return { address, network: networkAlias(), baseToken: client.baseToken.publicKeyString.get(), balances: rows };
+        if (!ctx.seed) return locked();
+        const { account, address } = accountFromSeed(ctx.seed);
+        const rows = await readBalances(account);
+        return { address, network: networkAlias(), baseToken: account.publicKeyString.get(), balances: rows };
       },
     }),
 

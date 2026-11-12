@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/agent/session';
 import {
   capSpent,
   setDailyCap,
@@ -20,14 +19,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const cookie = req.headers.get('cookie') ?? '';
-  const sid = cookie.match(/kt_sid=([^;]+)/)?.[1];
-  const session = getSession(sid);
-  if (!session) {
+  const body = (await req.json()) as { dailyCapUsd?: number; seed?: string };
+  const seed = typeof body.seed === 'string' && body.seed.trim() ? body.seed.trim() : null;
+  if (!seed) {
     return NextResponse.json({ error: 'Wallet locked — unlock before changing the cap.' }, { status: 401 });
   }
-
-  const body = (await req.json()) as { dailyCapUsd?: number };
   const value = Number(body.dailyCapUsd);
   if (!Number.isFinite(value) || value <= 0) {
     return NextResponse.json({ error: 'Cap must be a positive number.' }, { status: 400 });

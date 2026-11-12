@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import type { UIMessage } from 'ai';
 import PwaRegister, { type BeforeInstallPromptEvent } from '@/components/PwaRegister';
 import ViewportLock from '@/components/ViewportLock';
 import Automations from '@/components/Automations';
 import ChatPanel from '@/components/ChatPanel';
+import WalletPanel from '@/components/WalletPanel';
 
 type ProviderConfig = {
   type: 'gateway' | 'openai-compatible';
@@ -122,10 +123,11 @@ export default function Home() {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
 
   const [unlock, setUnlock] = useState({ hasWallet: false, address: null as string | null, unlocked: false });
-  const [passphrase, setPassphrase] = useState('');
-  const [mode, setMode] = useState<'unlock' | 'create'>('unlock');
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
+  /**
+   * The wallet seed lives in memory for this session only. It is sent with the
+   * requests that need a signature and is never stored on the server.
+   */
+  const [seed, setSeed] = useState<string | null>(null);
   const [state, setState] = useState<{ balances: { token: string; display: string }[]; cap: { spentUsd: number; capUsd: number } } | null>(null);
   const [capDraft, setCapDraft] = useState<string | null>(null);
   // The input follows the stored cap until the user edits it.
@@ -138,12 +140,16 @@ export default function Home() {
   const [activeMessages, setActiveMessages] = useState<UIMessage[]>([]);
 
 
-  async function refresh() {
-    const r = await fetch('/api/state');
+  const refresh = useCallback(async () => {
+    const r = await fetch('/api/state', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ seed }),
+    });
     const j = await r.json();
-    setUnlock({ hasWallet: j.hasWallet, address: j.address, unlocked: j.unlocked });
+    setUnlock({ hasWallet: j.hasWallet, address: j.address, unlocked: Boolean(j.unlocked) });
     setState(j);
-  }
+  }, [seed]);
 
   async function loadChats() {
     const r = await fetch('/api/chats');
@@ -233,7 +239,7 @@ export default function Home() {
       clearTimeout(first);
       clearInterval(t);
     };
-  }, []);
+  }, [refresh]);
 
   async function saveCap(e: React.FormEvent) {
     e.preventDefault();
@@ -243,7 +249,7 @@ export default function Home() {
       const r = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ dailyCapUsd: Number(capInput) }),
+        body: JSON.stringify({ dailyCapUsd: Number(capInput), seed }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'failed');
@@ -261,11 +267,15 @@ export default function Home() {
   useEffect(() => {
     if (!unlock.unlocked) return;
     const tick = () => {
-      fetch('/api/automations/run', { method: 'POST' }).catch(() => undefined);
+      fetch('/api/automations/run', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seed }),
+      }).catch(() => undefined);
     };
     const t = setInterval(tick, 60_000);
     return () => clearInterval(t);
-  }, [unlock.unlocked]);
+  }, [unlock.unlocked, seed]);
 
   useEffect(() => {
     if (!notice) return;
@@ -367,37 +377,12 @@ export default function Home() {
     setSetupDismissed(false);
   }
 
-  async function doUnlock(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setMsg('');
-    try {
-      const r = await fetch('/api/unlock', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ passphrase, mode }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || 'failed');
-      setPassphrase('');
-      await refresh();
-    } catch (err) {
-      setMsg((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function lock() {
-    await fetch('/api/unlock', { method: 'DELETE' });
-    await refresh();
-  }
 
   async function confirmTrade(tradeId: string, setter: (r: unknown) => void) {
     const r = await fetch('/api/confirm', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tradeId }),
+      body: JSON.stringify({ tradeId, seed }),
     });
     const j = await r.json();
     setter(j);
@@ -533,6 +518,7 @@ export default function Home() {
             chatId={activeChatId}
             initialMessages={activeMessages}
             providerConfig={cfg}
+            seed={seed}
             cap={cap ?? null}
             unlocked={unlock.unlocked}
             address={unlock.address}
@@ -545,12 +531,17 @@ export default function Home() {
         {view === 'wallet' && (
           <div className="flex-1 overflow-y-auto p-8 max-w-2xl mx-auto w-full">
             <h1 className="text-2xl font-bold mb-6">Wallet</h1>
-            <div className="space-y-4">
-              <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
-                <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">Address</div>
-                <div className="font-mono text-sm break-all">{unlock.address || 'No wallet yet'}</div>
-              </div>
-              <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
+            <WalletPanel
+              address={unlock.address}
+              seed={seed}
+              onSeed={setSeed}
+              onRegistered={(address) => {
+                setUnlock((u) => ({ ...u, address, hasWallet: true }));
+                void refresh();
+              }}
+            />
+            {unlock.unlocked && (
+              <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5 mt-4">
                 <div className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Balances</div>
                 {state?.balances?.length ? (
                   <div className="space-y-2">
@@ -565,30 +556,7 @@ export default function Home() {
                   <p className="text-sm text-zinc-500">No balances.</p>
                 )}
               </div>
-              <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
-                <div className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Unlock / Create</div>
-                <form onSubmit={doUnlock} className="flex flex-col gap-2">
-                  <div className="flex gap-1 text-xs">
-                    <button type="button" onClick={() => setMode('unlock')} className={`flex-1 py-1.5 rounded ${mode === 'unlock' ? 'bg-[#4C1D95] text-white' : 'bg-zinc-800 text-zinc-400'}`}>Unlock</button>
-                    <button type="button" onClick={() => setMode('create')} className={`flex-1 py-1.5 rounded ${mode === 'create' ? 'bg-[#4C1D95] text-white' : 'bg-zinc-800 text-zinc-400'}`}>Create</button>
-                  </div>
-                  <input
-                    type="password"
-                    value={passphrase}
-                    onChange={(e) => setPassphrase(e.target.value)}
-                    placeholder={mode === 'create' ? 'choose a strong passphrase' : 'passphrase'}
-                    className="px-3 py-2.5 rounded-lg bg-[#09090B] border border-zinc-700 text-sm focus:outline-none focus:border-purple-600"
-                  />
-                  <button disabled={busy} className="px-3 py-2.5 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-50 text-sm font-medium text-white">
-                    {busy ? '…' : mode === 'create' ? 'Create wallet' : 'Unlock'}
-                  </button>
-                  {msg && <p className="text-xs text-red-400">{msg}</p>}
-                </form>
-                {unlock.unlocked && (
-                  <button onClick={lock} className="mt-3 w-full px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm">Lock wallet</button>
-                )}
-              </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -630,7 +598,7 @@ export default function Home() {
               Scheduled swaps and price alerts. Keeta has no on-chain scheduler, so these run on a Vercel schedule
               (every 15m) and while the app is open.
             </p>
-            <Automations unlocked={unlock.unlocked} onNotice={(m) => setNotice(m)} />
+            <Automations unlocked={unlock.unlocked} seed={seed} onNotice={(m) => setNotice(m)} />
           </div>
         )}
 

@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/agent/session';
 import { createAutomationWallet, getAutomationWallet, automationEnabled } from '@/lib/automations/wallet';
 import { userClient } from '@/lib/keeta/network';
 import { unlockAutomationWallet } from '@/lib/automations/wallet';
@@ -30,9 +29,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const cookie = req.headers.get('cookie') ?? '';
-  const sid = cookie.match(/kt_sid=([^;]+)/)?.[1];
-  if (!getSession(sid)) {
+  const body = (await req.json().catch(() => ({}))) as { seed?: string };
+  const seed = typeof body.seed === 'string' && body.seed.trim() ? body.seed.trim() : null;
+  if (!seed) {
     return NextResponse.json({ error: 'Wallet locked — unlock first.' }, { status: 401 });
   }
   try {

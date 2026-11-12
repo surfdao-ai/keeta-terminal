@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/agent/session';
 import {
   listAutomations,
   upsertAutomation,
@@ -27,13 +26,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const cookie = req.headers.get('cookie') ?? '';
-  const sid = cookie.match(/kt_sid=([^;]+)/)?.[1];
-  if (!getSession(sid)) {
+  const body = (await req.json()) as { action?: string; seed?: string; [k: string]: unknown };
+  const seed = typeof body.seed === 'string' && body.seed.trim() ? body.seed.trim() : null;
+  if (!seed) {
     return NextResponse.json({ error: 'Wallet locked — unlock to manage automations.' }, { status: 401 });
   }
-
-  const body = (await req.json()) as { action?: string; [k: string]: unknown };
 
   if (body.action === 'delete') {
     await removeAutomation(String(body.id));

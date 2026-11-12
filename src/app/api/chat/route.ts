@@ -9,7 +9,6 @@ import {
   isStepCount,
   type ToolSet,
 } from 'ai';
-import { getSession } from '@/lib/agent/session';
 import { buildTools } from '@/lib/agent/tools';
 import { buildModel } from '@/lib/llm';
 import type { ProviderConfig } from '@/lib/llm';
@@ -79,11 +78,13 @@ SAFETY RULES (non-negotiable):
 8. Token launches are native to Keeta (no contract). Initial supply is minted to the creator and needs KTA for fees.`;
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as { messages: UIMessage[]; providerConfig?: ProviderConfig };
-  const cookie = req.headers.get('cookie') ?? '';
-  const sid = cookie.match(/kt_sid=([^;]+)/)?.[1];
-  const session = getSession(sid);
-  const passphrase = session?.passphrase ?? null;
+  const body = (await req.json()) as {
+    messages: UIMessage[];
+    providerConfig?: ProviderConfig;
+    /** Wallet seed, sent by the browser for this request only. */
+    seed?: string;
+  };
+  const seed = typeof body.seed === 'string' && body.seed.trim() ? body.seed.trim() : null;
 
   let model;
   try {
@@ -99,13 +100,13 @@ export async function POST(req: Request) {
     return new Response(
       JSON.stringify({
         error:
-          'No model configured. Open "Model setup" and pick a provider. "Free, no key" works immediately with no account and no credit card; Ollama Cloud, Kilo Gateway, OpenRouter, Groq and Together also work without one.',
+          'No model configured. Open "Model setup" and pick a provider. "Free, no key" works immediately with no account and no credit card; OpenRouter, Groq, Together and Ollama Cloud also work without one.',
       }),
       { status: 400, headers: { 'content-type': 'application/json' } },
     );
   }
 
-  const tools: ToolSet = buildTools({ passphrase }) as ToolSet;
+  const tools: ToolSet = buildTools({ seed }) as ToolSet;
 
   const mcpUrl = process.env.KEESPECS_MCP_URL || 'https://keespecs.xyz/mcp';
   let mcpClient: Awaited<ReturnType<typeof createMCPClient>> | null = null;

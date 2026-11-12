@@ -40,10 +40,12 @@ interface WalletInfo {
 
 interface Props {
   unlocked: boolean;
+  /** The wallet seed, sent with the requests that authorise spending. */
+  seed: string | null;
   onNotice: (msg: string) => void;
 }
 
-export default function Automations({ unlocked, onNotice }: Props) {
+export default function Automations({ unlocked, seed, onNotice }: Props) {
   const [list, setList] = useState<Automation[]>([]);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [wallet, setWallet] = useState<WalletInfo>({ address: null });
@@ -98,7 +100,7 @@ export default function Automations({ unlocked, onNotice }: Props) {
       const r = await fetch('/api/automations', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, seed }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'failed');
@@ -116,7 +118,7 @@ export default function Automations({ unlocked, onNotice }: Props) {
     const r = await fetch('/api/automations', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'toggle', id }),
+      body: JSON.stringify({ action: 'toggle', id, seed }),
     });
     const j = await r.json();
     if (!r.ok) return onNotice(`err  ${j.error}`);
@@ -127,7 +129,7 @@ export default function Automations({ unlocked, onNotice }: Props) {
     const r = await fetch('/api/automations', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'delete', id }),
+      body: JSON.stringify({ action: 'delete', id, seed }),
     });
     const j = await r.json();
     if (!r.ok) return onNotice(`err  ${j.error}`);
@@ -137,7 +139,11 @@ export default function Automations({ unlocked, onNotice }: Props) {
   async function runNow() {
     setRunning(true);
     try {
-      const r = await fetch('/api/automations/run', { method: 'POST' });
+      const r = await fetch('/api/automations/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ seed }),
+    });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'failed');
       onNotice(`ok  checked ${j.checked} · triggered ${j.triggered} · executed ${j.executed} · failed ${j.failed}`);
@@ -150,7 +156,11 @@ export default function Automations({ unlocked, onNotice }: Props) {
   }
 
   async function createWallet() {
-    const r = await fetch('/api/automations/wallet', { method: 'POST' });
+    const r = await fetch('/api/automations/wallet', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ seed }),
+    });
     const j = await r.json();
     if (!r.ok) return onNotice(`err  ${j.error}`);
     await load();
