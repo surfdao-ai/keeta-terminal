@@ -55,7 +55,15 @@ async function getPostgres(): Promise<PgDB> {
   if (!pgPromise) {
     pgPromise = (async () => {
       const postgres = (await import('postgres')).default;
-      const sql = postgres(process.env.DATABASE_URL!, { ssl: 'require' });
+      const sql = postgres(process.env.DATABASE_URL!, {
+        ssl: 'require',
+        // Serverless-friendly pool: few connections, released between requests.
+        max: 5,
+        idle_timeout: 20,
+        connect_timeout: 10,
+        // Pooler-safe: no server-side prepared statements.
+        prepare: false,
+      });
       await sql`CREATE TABLE IF NOT EXISTS kt_store (key text primary key, value jsonb not null, updated timestamptz not null default now())`;
       return {
         sql,
