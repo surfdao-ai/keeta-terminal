@@ -74,9 +74,17 @@ export default function Automations({ unlocked, onNotice }: Props) {
   }, []);
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 20000);
-    return () => clearInterval(t);
+    // Deferred so the effect body itself does not set state synchronously.
+    const first = setTimeout(() => {
+      void load();
+    }, 0);
+    const t = setInterval(() => {
+      void load();
+    }, 20000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(t);
+    };
   }, [load]);
 
   async function create(e: React.FormEvent) {

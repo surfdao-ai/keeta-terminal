@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import * as KeetaNet from '@keetanetwork/keetanet-client';
-import { networkAlias, userClient, loadFXClient, decimalsFromMetadata, toDisplay, fromDisplay, getTokenInfo, summarizeQuote, normalizeToken } from '../keeta/network';
+import { networkAlias, userClient, loadFXClient, toDisplay, fromDisplay, getTokenInfo, summarizeQuote, normalizeToken } from '../keeta/network';
 import { unlockWallet } from '../keeta/wallet';
 import { newPendingTrade, savePending, listTrades, capSpent, dailyCapUsd } from './safety';
 import { validateTokenSpec } from '../keeta/tokens';

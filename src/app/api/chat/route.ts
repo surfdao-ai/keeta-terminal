@@ -6,7 +6,6 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
   toUIMessageStream,
-  gateway,
   isStepCount,
   type ToolSet,
 } from 'ai';

@@ -1,6 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
+
+/** Online/offline as an external store — no setState inside an effect. */
+function subscribeConnectivity(onChange: () => void): () => void {
+  window.addEventListener('online', onChange);
+  window.addEventListener('offline', onChange);
+  return () => {
+    window.removeEventListener('online', onChange);
+    window.removeEventListener('offline', onChange);
+  };
+}
 
 /** Registers the service worker and surfaces the PWA install prompt. */
 export default function PwaRegister({
@@ -8,23 +18,16 @@ export default function PwaRegister({
 }: {
   onInstallPrompt?: (event: BeforeInstallPromptEvent) => void;
 }) {
-  const [offline, setOffline] = useState(false);
+  const offline = useSyncExternalStore(
+    subscribeConnectivity,
+    () => !navigator.onLine,
+    () => false,
+  );
 
   useEffect(() => {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => undefined);
     }
-
-    const on = () => setOffline(false);
-    const off = () => setOffline(true);
-    window.addEventListener('online', on);
-    window.addEventListener('offline', off);
-    setOffline(!navigator.onLine);
-
-    return () => {
-      window.removeEventListener('online', on);
-      window.removeEventListener('offline', off);
-    };
   }, []);
 
   useEffect(() => {

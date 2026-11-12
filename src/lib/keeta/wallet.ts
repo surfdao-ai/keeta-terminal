@@ -6,7 +6,7 @@
  * - Unlock = derive key, decrypt seed, build Account, open UserClient.
  * - Plaintext seed exists only in the in-memory session map.
  */
-import { scryptSync, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
+import { scryptSync, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import * as KeetaNet from '@keetanetwork/keetanet-client';
 import type { KeetaAccount } from './network';
 import { dbRead, dbWrite } from '../db';

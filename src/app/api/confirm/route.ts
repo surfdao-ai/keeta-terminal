@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import * as KeetaNet from '@keetanetwork/keetanet-client';
-import { userClient, loadFXClient, decimalsFromMetadata, toDisplay, fromDisplay, getTokenInfo } from '@/lib/keeta/network';
+import { userClient, loadFXClient, toDisplay, fromDisplay, getTokenInfo } from '@/lib/keeta/network';
 import { getSession } from '@/lib/agent/session';
 import { loadPending, removePending, appendTrade, capSpent, addCapSpend, dailyCapUsd, isExpired } from '@/lib/agent/safety';
 import { unlockWallet } from '@/lib/keeta/wallet';
@@ -25,7 +24,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { account, address } = await unlockWallet(session.passphrase);
+    const { account } = await unlockWallet(session.passphrase);
     const { fromToken: from, toToken: to, amount, affinity } = pending;
 
     // ---- token launch path (native tokenization, no contract) ----

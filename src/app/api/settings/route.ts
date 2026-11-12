@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/agent/session';
 import {
   capSpent,
-  dailyCapUsd,
   setDailyCap,
   getSettings,
   MAX_CAP_USD,

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createSession, destroySession, getSession } from '@/lib/agent/session';
+import { createSession, destroySession } from '@/lib/agent/session';
 import { createWallet, unlockWallet, hasWallet, walletAddress } from '@/lib/keeta/wallet';
 
 

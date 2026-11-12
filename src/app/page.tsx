@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useSyncExternalStore } from 'react';
 import type { UIMessage } from 'ai';
 import PwaRegister, { type BeforeInstallPromptEvent } from '@/components/PwaRegister';
 import Automations from '@/components/Automations';
@@ -29,14 +29,45 @@ const PRESETS: { id: string; label: string; type: ProviderConfig['type']; baseUr
 ];
 
 const STORAGE_KEY = 'keeta-terminal-provider';
+const CFG_EVENT = 'kt-provider-config';
+
+/**
+ * The provider config lives in localStorage. It is read through
+ * useSyncExternalStore so the server render (no localStorage) and the client
+ * render agree — reading it into useState inside an effect would flash the
+ * "Model setup" dialog on every reload.
+ */
+let cfgCache: ProviderConfig | null | undefined;
 
 function loadCfg(): ProviderConfig | null {
+  if (cfgCache !== undefined) return cfgCache;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as ProviderConfig) : null;
+    cfgCache = raw ? (JSON.parse(raw) as ProviderConfig) : null;
   } catch {
-    return null;
+    cfgCache = null;
   }
+  return cfgCache;
+}
+
+function saveCfg(c: ProviderConfig | null): void {
+  if (c) localStorage.setItem(STORAGE_KEY, JSON.stringify(c));
+  else localStorage.removeItem(STORAGE_KEY);
+  cfgCache = undefined;
+  window.dispatchEvent(new Event(CFG_EVENT));
+}
+
+function subscribeCfg(onStoreChange: () => void): () => void {
+  const on = () => {
+    cfgCache = undefined;
+    onStoreChange();
+  };
+  window.addEventListener('storage', on);
+  window.addEventListener(CFG_EVENT, on);
+  return () => {
+    window.removeEventListener('storage', on);
+    window.removeEventListener(CFG_EVENT, on);
+  };
 }
 
 type View = 'chat' | 'wallet' | 'trade' | 'automations' | 'settings';
@@ -50,8 +81,12 @@ const NAV: { id: View; label: string; icon: string }[] = [
 ];
 
 export default function Home() {
-  const [cfg, setCfg] = useState<ProviderConfig | null>(null);
-  const [setupOpen, setSetupOpen] = useState(false);
+  const cfg = useSyncExternalStore(subscribeCfg, loadCfg, () => null);
+  const [setupDismissed, setSetupDismissed] = useState(false);
+  const [setupRequested, setSetupRequested] = useState(false);
+  // The dialog opens by itself until the user dismisses it, and can always be
+  // reopened from the "Model setup" button.
+  const setupOpen = setupRequested || (!cfg && !setupDismissed);
   const [presetId, setPresetId] = useState('free');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -71,7 +106,9 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [state, setState] = useState<{ balances: { token: string; display: string }[]; cap: { spentUsd: number; capUsd: number } } | null>(null);
-  const [capInput, setCapInput] = useState('100');
+  const [capDraft, setCapDraft] = useState<string | null>(null);
+  // The input follows the stored cap until the user edits it.
+  const capInput = capDraft ?? (state?.cap?.capUsd !== undefined ? String(state.cap.capUsd) : '100');
   const [capSaving, setCapSaving] = useState(false);
   const [capMsg, setCapMsg] = useState('');
   const [notice, setNotice] = useState('');
@@ -79,12 +116,6 @@ export default function Home() {
   const [activeChatId, setActiveChatId] = useState('');
   const [activeMessages, setActiveMessages] = useState<UIMessage[]>([]);
 
-
-  useEffect(() => {
-    const c = loadCfg();
-    setCfg(c);
-    if (!c) setSetupOpen(true);
-  }, []);
 
   async function refresh() {
     const r = await fetch('/api/state');
@@ -111,7 +142,6 @@ export default function Home() {
 
   async function newChat() {
     const id = crypto.randomUUID();
-    const now = new Date().toISOString();
     await fetch('/api/chats', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -170,14 +200,19 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 15000);
-    return () => clearInterval(t);
+    // The first poll is deferred so the effect body itself does not set
+    // state synchronously; the interval keeps the view fresh.
+    const first = setTimeout(() => {
+      void refresh();
+    }, 0);
+    const t = setInterval(() => {
+      void refresh();
+    }, 15000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(t);
+    };
   }, []);
-
-  useEffect(() => {
-    if (state?.cap?.capUsd !== undefined) setCapInput(String(state.cap.capUsd));
-  }, [state?.cap?.capUsd]);
 
   async function saveCap(e: React.FormEvent) {
     e.preventDefault();
@@ -192,6 +227,7 @@ export default function Home() {
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'failed');
       setCapMsg('ok  cap updated');
+      setCapDraft(null);
       await refresh();
     } catch (err) {
       setCapMsg(`err  ${(err as Error).message}`);
@@ -275,7 +311,8 @@ export default function Home() {
     setModel(m);
     setModelOptions([]);
     setModelsError('');
-    setSetupOpen(true);
+    setSetupRequested(true);
+    setSetupDismissed(false);
     if (p.type === 'openai-compatible') {
       void loadModels({ baseUrl: b, apiKey: k, presetId: p.id });
     }
@@ -293,15 +330,15 @@ export default function Home() {
       c.baseUrl = (baseUrl.trim() || p.baseUrl) as string;
       if (apiKey.trim()) c.apiKey = apiKey.trim();
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(c));
-    setCfg(c);
-    setSetupOpen(false);
+    saveCfg(c);
+    setSetupRequested(false);
+    setSetupDismissed(true);
   }
 
   function clearSetup() {
-    localStorage.removeItem(STORAGE_KEY);
-    setCfg(null);
-    setSetupOpen(true);
+    saveCfg(null);
+    setSetupRequested(true);
+    setSetupDismissed(false);
   }
 
   async function doUnlock(e: React.FormEvent) {
@@ -342,7 +379,6 @@ export default function Home() {
   }
 
   const preset = PRESETS.find((x) => x.id === presetId)!;
-  const balances = state?.balances || [];
   const cap = state?.cap;
 
   return (
@@ -547,7 +583,7 @@ export default function Home() {
                   min="1"
                   step="1"
                   value={capInput}
-                  onChange={(e) => setCapInput(e.target.value)}
+                  onChange={(e) => setCapDraft(e.target.value)}
                   className="w-28 px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
                 />
                 <button disabled={capSaving} className="px-3 py-2 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-50 text-sm text-white">
@@ -604,7 +640,7 @@ export default function Home() {
                     min="1"
                     step="1"
                     value={capInput}
-                    onChange={(e) => setCapInput(e.target.value)}
+                    onChange={(e) => setCapDraft(e.target.value)}
                     className="flex-1 px-3 py-2.5 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
                   />
                   <button
@@ -723,7 +759,7 @@ export default function Home() {
             </div>
             <div className="flex gap-2 justify-end pt-2">
               {cfg && <button type="button" onClick={() => { clearSetup(); }} className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm">Clear</button>}
-              <button type="button" onClick={() => setSetupOpen(false)} className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm">Cancel</button>
+              <button type="button" onClick={() => { setSetupRequested(false); setSetupDismissed(true); }} className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm">Cancel</button>
               <button type="submit" className="px-4 py-2 rounded-lg bg-[#4C1D95] hover:bg-purple-700 text-sm font-medium text-white">Save & close</button>
             </div>
           </form>

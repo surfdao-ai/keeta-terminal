@@ -149,7 +149,7 @@ async function getPostgres(): Promise<PgDB> {
   return pgPromise;
 }
 
-function usePostgres(): boolean {
+function hasPostgres(): boolean {
   return Boolean(process.env.DATABASE_URL);
 }
 
@@ -254,7 +254,7 @@ const blobDB: KVBackend = {
   },
 };
 
-function useBlob(): boolean {
+function hasBlob(): boolean {
   return Boolean(process.env.BLOB_STORE_ID);
 }
 
@@ -288,9 +288,9 @@ function isRuntimeWritable(): boolean {
 function selectedBackend(): BackendName {
   const forced = process.env.KV_BACKEND?.trim().toLowerCase();
   if (forced === 'postgres' || forced === 'blob' || forced === 'file') return forced;
-  if (usePostgres()) return 'postgres';
+  if (hasPostgres()) return 'postgres';
   // Blob auth relies on the Vercel OIDC token (or a read-write token).
-  if (useBlob() && (process.env.VERCEL_OIDC_TOKEN || process.env.BLOB_READ_WRITE_TOKEN)) return 'blob';
+  if (hasBlob() && (process.env.VERCEL_OIDC_TOKEN || process.env.BLOB_READ_WRITE_TOKEN)) return 'blob';
   return 'file';
 }
 
