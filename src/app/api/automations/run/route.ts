@@ -22,6 +22,9 @@ export async function POST(req: Request) {
 
   const allowSwaps = Boolean(session) || authorisedBySecret;
   const report = await runAutomations({ allowSwaps });
+  console.log(
+    `automations run: mode=${allowSwaps ? 'full' : 'alerts-only'} secret=${authorisedBySecret ? 'yes' : 'no'} session=${Boolean(session)} report=${JSON.stringify(report)}`,
+  );
 
   return NextResponse.json({ ok: true, ...report, allowSwaps });
 }
