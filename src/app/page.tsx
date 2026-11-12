@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import ToolCard from '@/components/ToolCard';
@@ -14,7 +14,7 @@ type ProviderConfig = {
 };
 
 const PRESETS: { id: string; label: string; type: ProviderConfig['type']; baseUrl?: string; name?: string; defaultModel: string }[] = [
-  { id: 'vercel', label: 'Vercel AI Gateway (server key/OIDC)', type: 'gateway', defaultModel: 'anthropic/claude-sonnet-4.5' },
+  { id: 'vercel', label: 'Vercel AI Gateway', type: 'gateway', defaultModel: 'anthropic/claude-sonnet-4.5' },
   { id: 'vercel-key', label: 'Vercel AI Gateway (your key)', type: 'openai-compatible', baseUrl: 'https://ai-gateway.vercel.sh/v1', name: 'vercel', defaultModel: 'anthropic/claude-sonnet-4.5' },
   { id: 'openrouter', label: 'OpenRouter', type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1', name: 'openrouter', defaultModel: 'openai/gpt-4o-mini' },
   { id: 'groq', label: 'Groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', name: 'groq', defaultModel: 'llama-3.3-70b-versatile' },
@@ -49,6 +49,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [input, setInput] = useState('');
+  const [state, setState] = useState<{ balances: unknown; cap: { spentUsd: number; capUsd: number } } | null>(null);
 
   const transport = new DefaultChatTransport({
     api: '/api/chat',
@@ -57,6 +58,7 @@ export default function Home() {
     }),
   });
   const { messages, sendMessage, status } = useChat({ transport });
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const c = loadCfg();
@@ -68,10 +70,17 @@ export default function Home() {
     const r = await fetch('/api/state');
     const j = await r.json();
     setUnlock({ hasWallet: j.hasWallet, address: j.address, unlocked: j.unlocked });
+    setState(j);
   }
   useEffect(() => {
     refresh();
+    const t = setInterval(refresh, 15000);
+    return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, status]);
 
   function openSetup() {
     const c = cfg;
@@ -153,74 +162,140 @@ export default function Home() {
 
   const loading = status === 'streaming' || status === 'submitted';
   const preset = PRESETS.find((x) => x.id === presetId)!;
+  const balances = (state?.balances as { token: string; display: string }[] | null) || [];
+  const cap = state?.cap;
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-950 text-zinc-100">
-      <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-900">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Keeta Terminal</h1>
-          <p className="text-xs text-zinc-400">
-            {cfg ? `${cfg.type === 'gateway' ? 'Gateway' : cfg.name || 'OpenAI-compat'} · ${cfg.model}` : 'No model configured'}
-          </p>
+    <div className="flex flex-col h-screen bg-[#0a0b0f] text-zinc-100">
+      {/* top bar */}
+      <header className="flex items-center justify-between px-5 py-3 border-b border-zinc-800/80 bg-[#0d0e13]">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center font-bold text-black text-sm">K</div>
+          <div>
+            <h1 className="text-base font-bold tracking-tight">Keeta Terminal</h1>
+            <p className="text-[11px] text-zinc-500">AI trading · Keeta Network</p>
+          </div>
         </div>
-        <div className="flex items-center gap-3 text-sm">
-          {unlock.address ? (
-            <span className="font-mono text-xs text-zinc-300">{unlock.address.slice(0, 12)}…{unlock.address.slice(-6)}</span>
-          ) : (
-            <span className="text-zinc-500">no wallet</span>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-300">
+            {cfg ? `${cfg.type === 'gateway' ? 'Gateway' : cfg.name || 'OpenAI-compat'} · ${cfg.model}` : 'No model'}
+          </span>
+          {unlock.address && (
+            <span className="font-mono px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-300">
+              {unlock.address.slice(0, 10)}…{unlock.address.slice(-4)}
+            </span>
           )}
-          <button onClick={openSetup} className="px-3 py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-xs">Model setup</button>
+          <button onClick={openSetup} className="px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700">Model</button>
           {unlock.unlocked ? (
-            <button onClick={lock} className="px-3 py-1 rounded bg-zinc-700 hover:bg-zinc-600">Lock</button>
+            <button onClick={lock} className="px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700">Lock</button>
           ) : (
-            <span className="text-amber-400">locked</span>
+            <span className="px-3 py-1.5 rounded bg-amber-900/40 border border-amber-700 text-amber-300">locked</span>
           )}
         </div>
       </header>
 
       <div className="flex flex-1 min-h-0">
-        <aside className="w-72 border-r border-zinc-800 bg-zinc-900 p-4 hidden md:flex flex-col gap-4">
-          <div>
-            <h2 className="text-xs uppercase text-zinc-500 mb-2">Wallet</h2>
-            {!unlock.hasWallet && <p className="text-sm text-zinc-400">No wallet yet. Create one to start.</p>}
-            {unlock.hasWallet && !unlock.unlocked && <p className="text-sm text-amber-300">Unlock to trade.</p>}
-            {unlock.unlocked && <p className="text-sm text-emerald-300">Unlocked · ready to trade</p>}
-          </div>
-          <form onSubmit={doUnlock} className="flex flex-col gap-2">
-            <div className="flex gap-2 text-xs">
-              <button type="button" onClick={() => setMode('unlock')} className={`px-2 py-1 rounded ${mode === 'unlock' ? 'bg-zinc-700' : 'bg-zinc-800'}`}>Unlock</button>
-              <button type="button" onClick={() => setMode('create')} className={`px-2 py-1 rounded ${mode === 'create' ? 'bg-zinc-700' : 'bg-zinc-800'}`}>Create</button>
+        {/* sidebar */}
+        <aside className="w-80 border-r border-zinc-800/80 bg-[#0d0e13] flex flex-col">
+          {/* wallet card */}
+          <div className="p-4 border-b border-zinc-800/80">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs uppercase tracking-wider text-zinc-500">Wallet</h2>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full ${unlock.unlocked ? 'bg-emerald-900/40 text-emerald-300' : 'bg-zinc-800 text-zinc-400'}`}>
+                {unlock.unlocked ? 'unlocked' : unlock.hasWallet ? 'locked' : 'none'}
+              </span>
             </div>
-            <input
-              type="password"
-              value={passphrase}
-              onChange={(e) => setPassphrase(e.target.value)}
-              placeholder={mode === 'create' ? 'choose a strong passphrase' : 'passphrase'}
-              className="px-3 py-2 rounded bg-zinc-800 border border-zinc-700 text-sm"
-            />
-            <button disabled={busy} className="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-medium">
-              {busy ? '…' : mode === 'create' ? 'Create wallet' : 'Unlock'}
-            </button>
-            {msg && <p className="text-xs text-red-400">{msg}</p>}
-          </form>
-          <p className="text-xs text-zinc-500">
-            Passphrase derives the AES key that protects your seed. It never leaves the server memory after unlock.
-          </p>
+            {!unlock.hasWallet ? (
+              <p className="text-sm text-zinc-400">No wallet yet. Create one below.</p>
+            ) : !unlock.unlocked ? (
+              <p className="text-sm text-amber-300">Unlock to view balances & trade.</p>
+            ) : (
+              <div className="space-y-2">
+                {balances.length === 0 && <p className="text-sm text-zinc-500">No balances yet.</p>}
+                {balances.map((b, i) => (
+                  <div key={i} className="flex items-center justify-between bg-zinc-900/60 rounded px-3 py-2 border border-zinc-800">
+                    <span className="font-mono text-xs text-zinc-300">{b.token.slice(0, 10)}…</span>
+                    <span className="font-mono text-sm text-emerald-300">{b.display}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* unlock form */}
+          <div className="p-4 border-b border-zinc-800/80">
+            <form onSubmit={doUnlock} className="flex flex-col gap-2">
+              <div className="flex gap-1 text-xs">
+                <button type="button" onClick={() => setMode('unlock')} className={`flex-1 py-1.5 rounded ${mode === 'unlock' ? 'bg-zinc-700 text-white' : 'bg-zinc-800 text-zinc-400'}`}>Unlock</button>
+                <button type="button" onClick={() => setMode('create')} className={`flex-1 py-1.5 rounded ${mode === 'create' ? 'bg-zinc-700 text-white' : 'bg-zinc-800 text-zinc-400'}`}>Create</button>
+              </div>
+              <input
+                type="password"
+                value={passphrase}
+                onChange={(e) => setPassphrase(e.target.value)}
+                placeholder={mode === 'create' ? 'choose a strong passphrase' : 'passphrase'}
+                className="px-3 py-2 rounded bg-zinc-900 border border-zinc-700 text-sm focus:outline-none focus:border-emerald-500"
+              />
+              <button disabled={busy} className="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-medium">
+                {busy ? '…' : mode === 'create' ? 'Create wallet' : 'Unlock'}
+              </button>
+              {msg && <p className="text-xs text-red-400">{msg}</p>}
+            </form>
+          </div>
+
+          {/* daily cap */}
+          <div className="p-4 border-b border-zinc-800/80">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-xs uppercase tracking-wider text-zinc-500">Daily cap</h2>
+              <span className="text-xs text-zinc-400">
+                ${cap ? cap.spentUsd.toFixed(2) : '0.00'} / ${cap ? cap.capUsd : 100}
+              </span>
+            </div>
+            <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all"
+                style={{ width: `${cap ? Math.min(100, (cap.spentUsd / cap.capUsd) * 100) : 0}%` }}
+              />
+            </div>
+          </div>
+
+          {/* tips */}
+          <div className="p-4 text-xs text-zinc-500 mt-auto">
+            <p className="mb-1">Try commands:</p>
+            <p className="font-mono text-zinc-400">portfolio · tokens · estimate 1 KTA→USDC · propose 0.5 KTA→USDC</p>
+          </div>
         </aside>
 
-        <main className="flex flex-col flex-1 min-h-0">
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* chat */}
+        <main className="flex flex-col flex-1 min-h-0 bg-[#0a0b0f]">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4">
             {messages.length === 0 && (
-              <div className="text-zinc-500 text-sm">
-                Try: "what's my portfolio?", "list tradable tokens", "estimate 1 KTA to USDC", "propose trading 0.5 KTA for USDC".
+              <div className="max-w-2xl mx-auto mt-10 text-center">
+                <div className="text-4xl mb-3">⚡</div>
+                <h2 className="text-xl font-bold mb-2">Keeta Terminal</h2>
+                <p className="text-zinc-400 text-sm">Chat with your AI trading agent. Ask for balances, token lists, quotes, or propose a trade.</p>
+                <div className="mt-6 grid grid-cols-2 gap-2 text-xs">
+                  {['What\'s my portfolio?', 'List tradable tokens', 'Estimate 1 KTA to USDC', 'Propose 0.1 KTA for USDC'].map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => { setInput(q); }}
+                      className="px-3 py-2 rounded bg-zinc-900 border border-zinc-800 hover:border-emerald-600 text-zinc-300 text-left"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {messages.map((m) => (
               <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-3xl rounded-lg px-4 py-3 ${m.role === 'user' ? 'bg-emerald-700' : 'bg-zinc-800'}`}>
+                <div className={`max-w-3xl ${m.role === 'user' ? 'bg-emerald-600/90 text-white' : 'bg-zinc-900 border border-zinc-800'} rounded-2xl px-4 py-3`}>
+                  {m.role === 'assistant' && (
+                    <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Agent</div>
+                  )}
                   {m.parts.map((part, i) => {
                     if (part.type === 'text') {
-                      return <div key={i} className="whitespace-pre-wrap text-sm">{part.text}</div>;
+                      return <div key={i} className="whitespace-pre-wrap text-sm leading-relaxed">{part.text}</div>;
                     }
                     if (part.type.startsWith('tool-')) {
                       const toolName = part.type.slice(5);
@@ -243,7 +318,17 @@ export default function Home() {
                 </div>
               </div>
             ))}
-            {loading && <div className="text-zinc-500 text-sm">thinking…</div>}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3">
+                  <div className="flex gap-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <form
@@ -253,24 +338,27 @@ export default function Home() {
               sendMessage({ text: input });
               setInput('');
             }}
-            className="border-t border-zinc-800 p-3 flex gap-2"
+            className="border-t border-zinc-800/80 p-4 bg-[#0d0e13]"
           >
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask the terminal…"
-              className="flex-1 px-3 py-2 rounded bg-zinc-800 border border-zinc-700 text-sm"
-            />
-            <button disabled={loading} className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-medium">
-              Send
-            </button>
+            <div className="flex gap-2 items-center max-w-4xl mx-auto">
+              <span className="text-emerald-500 font-mono text-sm">$</span>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Ask the terminal… (e.g. propose 0.5 KTA for USDC)"
+                className="flex-1 px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-sm focus:outline-none focus:border-emerald-500 font-mono"
+              />
+              <button disabled={loading || !input.trim()} className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-sm font-medium">
+                Send
+              </button>
+            </div>
           </form>
         </main>
       </div>
 
       {setupOpen && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <form onSubmit={saveSetup} className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 w-full max-w-md flex flex-col gap-4">
+          <form onSubmit={saveSetup} className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md flex flex-col gap-4">
             <h2 className="text-lg font-bold">Model setup</h2>
             <p className="text-xs text-zinc-400">Choose any OpenAI-compatible provider or Vercel AI Gateway. Your key stays in your browser.</p>
             <label className="flex flex-col gap-1 text-sm">
