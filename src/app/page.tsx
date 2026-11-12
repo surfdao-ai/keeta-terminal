@@ -186,43 +186,44 @@ export default function Home() {
       >
         <div className="h-14 flex items-center px-4 border-b border-zinc-800/80 gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-600 to-indigo-800 flex items-center justify-center font-bold text-white text-sm shrink-0">K</div>
-          {sidebarOpen && <span className="font-semibold tracking-tight">KTerminal</span>}
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="ml-auto text-zinc-500 hover:text-white text-xs">
-            {sidebarOpen ? '◀' : '▶'}
+          {sidebarOpen && <span className="font-mono text-[13px] font-semibold tracking-tight">kterminal</span>}
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="ml-auto font-mono text-[11px] text-zinc-600 hover:text-white">
+            {sidebarOpen ? '[–]' : '[+]'}
           </button>
         </div>
 
         <button
           onClick={() => { setView('chat'); }}
-          className="mx-3 mt-3 px-3 py-2 rounded-lg bg-purple-900/40 border border-purple-700/60 text-sm font-medium text-purple-200 hover:bg-purple-900/60 flex items-center gap-2"
+          className="mx-3 mt-3 px-3 py-2 rounded-lg bg-purple-900/40 border border-purple-700/60 font-mono text-[13px] text-purple-200 hover:bg-purple-900/60 flex items-center gap-2"
         >
-          <span>＋</span>
-          {sidebarOpen && <span>New Chat</span>}
+          <span className="text-purple-400">+</span>
+          {sidebarOpen && <span>new chat</span>}
         </button>
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          {sidebarOpen && <div className="px-2 pb-2 font-mono text-[10px] uppercase tracking-wider text-zinc-700">workspace</div>}
           {NAV.map((n) => (
             <button
               key={n.id}
               onClick={() => setView(n.id)}
-              className={`w-full px-3 py-2 rounded-lg text-sm flex items-center gap-3 transition ${
+              className={`w-full px-3 py-2 rounded-lg font-mono text-[13px] flex items-center gap-3 transition ${
                 view === n.id
-                  ? 'bg-[#4C1D95] text-white font-medium'
+                  ? 'bg-[#4C1D95] text-white'
                   : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
               }`}
             >
-              <span className="w-5 text-center">{n.icon}</span>
-              {sidebarOpen && <span>{n.label}</span>}
+              <span className="w-4 text-center text-[11px]">{n.icon}</span>
+              {sidebarOpen && <span>{n.label.toLowerCase()}</span>}
             </button>
           ))}
         </nav>
 
-        <div className="px-3 py-3 border-t border-zinc-800/80 text-[11px] text-zinc-500 space-y-1">
+        <div className="px-3 py-3 border-t border-zinc-800/80 font-mono text-[11px] text-zinc-600 space-y-1">
           {sidebarOpen && (
             <>
-              <a href="https://docs.keeta.com" target="_blank" rel="noreferrer" className="block hover:text-zinc-300">Docs</a>
-              <a href="https://github.com/surfdao-ai/keeta-terminal" target="_blank" rel="noreferrer" className="block hover:text-zinc-300">GitHub</a>
-              <div className="pt-1 text-zinc-600">v1.0</div>
+              <a href="https://docs.keeta.com" target="_blank" rel="noreferrer" className="block hover:text-zinc-300">docs</a>
+              <a href="https://github.com/surfdao-ai/keeta-terminal" target="_blank" rel="noreferrer" className="block hover:text-zinc-300">github</a>
+              <div className="pt-1 text-zinc-700">v1.0.0 · keeta mainnet</div>
             </>
           )}
         </div>
@@ -234,74 +235,118 @@ export default function Home() {
           <>
             <div ref={scrollRef} className="flex-1 overflow-y-auto">
               {messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center px-6 text-center">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-800 flex items-center justify-center font-bold text-white text-2xl mb-6">K</div>
-                  <h1 className="text-4xl font-bold tracking-tight mb-2">What's on your mind?</h1>
-                  <p className="text-zinc-500 text-sm max-w-md">
-                    Ask KTerminal to check balances, list tokens, get quotes, or propose a trade on Keeta.
-                  </p>
-                  <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl w-full">
-                    {['What\'s my portfolio?', 'List tradable tokens', 'Estimate 1 KTA to USDC', 'Propose 0.1 KTA for USDC'].map((q) => (
-                      <button
-                        key={q}
-                        onClick={() => setInput(q)}
-                        className="px-4 py-3 rounded-xl bg-[#141416] border border-zinc-800 hover:border-purple-600 text-zinc-300 text-sm text-left transition"
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="max-w-3xl mx-auto px-6 py-8 space-y-5">
-                  {messages.map((m) => (
-                    <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[85%] ${m.role === 'user' ? 'bg-[#4C1D95] text-white' : 'bg-[#141416] border border-zinc-800 text-[#F7F7F7]'} rounded-2xl px-4 py-3`}>
-                        {m.role === 'assistant' && (
-                          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Agent</div>
-                        )}
-                        {m.parts.map((part, i) => {
-                          if (part.type === 'text') {
-                            return <div key={i} className="whitespace-pre-wrap text-sm leading-relaxed">{part.text}</div>;
-                          }
-                          if (part.type.startsWith('tool-')) {
-                            const toolName = part.type.slice(5);
-                            const state = (part as { state?: string }).state;
-                            const input = (part as { input?: unknown }).input;
-                            const output = (part as { output?: unknown }).output;
-                            return (
-                              <ToolCard
-                                key={i}
-                                name={toolName}
-                                state={state}
-                                input={input}
-                                output={output}
-                                onConfirm={confirmTrade}
-                              />
-                            );
-                          }
-                          return null;
-                        })}
+                <div className="h-full flex flex-col items-center justify-center px-6">
+                  <div className="w-full max-w-2xl">
+                    <div className="bg-[#0d0d10] border border-zinc-800 rounded-lg overflow-hidden shadow-[0_0_60px_-20px_rgba(76,29,149,0.5)]">
+                      <div className="flex items-center gap-2 px-4 py-2 bg-[#141416] border-b border-zinc-800">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
+                        <span className="ml-3 font-mono text-[11px] text-zinc-500">kterminal — keeta:agent</span>
                       </div>
-                    </div>
-                  ))}
-                  {loading && (
-                    <div className="flex justify-start">
-                      <div className="bg-[#141416] border border-zinc-800 rounded-2xl px-4 py-3">
-                        <div className="flex gap-1">
-                          <span className="w-2 h-2 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <span className="w-2 h-2 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                          <span className="w-2 h-2 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                      <div className="p-5 font-mono text-[13px] leading-relaxed">
+                        <div className="text-zinc-500">KTerminal v1.0 — keeta mainnet</div>
+                        <div className="text-zinc-500">agent <span className="text-emerald-400">online</span> · wallet <span className={unlock.unlocked ? 'text-emerald-400' : 'text-amber-400'}>{unlock.unlocked ? 'unlocked' : 'locked'}</span> · model <span className="text-zinc-400">{cfg ? cfg.model : 'not configured'}</span></div>
+                        <div className="mt-3 text-zinc-400">
+                          <span className="text-purple-400">&gt;</span> <span className="inline-block w-2 h-4 bg-purple-500 animate-pulse align-middle" />
                         </div>
                       </div>
                     </div>
-                  )}
+                    <h1 className="mt-8 text-center text-3xl font-bold tracking-tight">What&apos;s on your mind?</h1>
+                    <p className="mt-2 text-center text-sm text-zinc-500">
+                      Check balances, list tokens, get quotes, or propose a trade on Keeta.
+                    </p>
+                    <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {['portfolio', 'list tokens', 'estimate 1 KTA to USDC', 'propose 0.1 KTA for USDC'].map((q) => (
+                        <button
+                          key={q}
+                          onClick={() => setInput(q)}
+                          className="font-mono text-[12px] px-4 py-2.5 rounded-lg bg-[#141416] border border-zinc-800 hover:border-purple-600 text-zinc-400 hover:text-zinc-200 text-left transition"
+                        >
+                          <span className="text-purple-400">&gt;</span> {q}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="max-w-4xl mx-auto px-5 py-6">
+                  {/* terminal window chrome */}
+                  <div className="bg-[#0d0d10] border border-zinc-800 rounded-lg overflow-hidden shadow-[0_0_60px_-20px_rgba(76,29,149,0.5)]">
+                    <div className="flex items-center gap-2 px-4 py-2 bg-[#141416] border-b border-zinc-800">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
+                      <span className="ml-3 font-mono text-[11px] text-zinc-500">kterminal — keeta:agent</span>
+                      <span className="ml-auto font-mono text-[11px] text-zinc-600">
+                        {cap ? `cap ${cap.spentUsd.toFixed(2)}/${cap.capUsd}` : 'cap 0.00/100'}
+                      </span>
+                    </div>
+                    <div className="p-4 font-mono text-[13px] leading-relaxed">
+                      {messages.map((m) => (
+                        <div key={m.id} className="mb-3">
+                          {m.role === 'user' ? (
+                            <div className="flex gap-2">
+                              <span className="text-purple-400 select-none">&gt;</span>
+                              <span className="text-[#F7F7F7] whitespace-pre-wrap break-words">{m.parts.filter((p) => p.type === 'text').map((p) => (p as { text: string }).text).join(' ')}</span>
+                            </div>
+                          ) : (
+                            <div>
+                              {m.parts.map((part, i) => {
+                                if (part.type === 'text') {
+                                  const txt = (part as { text: string }).text;
+                                  if (!txt.trim()) return null;
+                                  return (
+                                    <div key={i} className="flex gap-2">
+                                      <span className="text-emerald-500 select-none">◆</span>
+                                      <span className="text-zinc-200 whitespace-pre-wrap break-words">{txt}</span>
+                                    </div>
+                                  );
+                                }
+                                if (part.type.startsWith('tool-')) {
+                                  const toolName = part.type.slice(5);
+                                  const st = (part as { state?: string }).state;
+                                  const inp = (part as { input?: unknown }).input;
+                                  const out = (part as { output?: unknown }).output;
+                                  return (
+                                    <ToolCard
+                                      key={i}
+                                      name={toolName}
+                                      state={st}
+                                      input={inp}
+                                      output={out}
+                                      onConfirm={confirmTrade}
+                                    />
+                                  );
+                                }
+                                return null;
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {loading && (
+                        <div className="flex gap-2">
+                          <span className="text-emerald-500 select-none">◆</span>
+                          <span className="text-zinc-500">
+                            running<span className="animate-pulse">_</span>
+                          </span>
+                        </div>
+                      )}
+                      {!loading && (
+                        <div className="flex gap-2">
+                          <span className="text-purple-400 select-none">&gt;</span>
+                          <span className="inline-block w-2 h-4 bg-purple-500 animate-pulse align-middle" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
 
             <div className="border-t border-zinc-800/80 p-4 bg-[#09090B]">
-              <div className="max-w-3xl mx-auto">
+              <div className="max-w-4xl mx-auto">
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -309,8 +354,9 @@ export default function Home() {
                     sendMessage({ text: input });
                     setInput('');
                   }}
-                  className="flex gap-2 items-end bg-[#141416] border border-zinc-800 rounded-2xl px-4 py-3 focus-within:border-purple-600 transition"
+                  className="flex gap-2 items-end bg-[#0d0d10] border border-zinc-800 rounded-lg px-4 py-3 focus-within:border-purple-600 transition font-mono"
                 >
+                  <span className="text-purple-400 select-none leading-6">&gt;</span>
                   <textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
@@ -325,19 +371,19 @@ export default function Home() {
                     }}
                     placeholder="Ask anything..."
                     rows={1}
-                    className="flex-1 bg-transparent resize-none outline-none text-sm text-[#F7F7F7] placeholder-zinc-500 max-h-40"
+                    className="flex-1 bg-transparent resize-none outline-none text-[13px] text-[#F7F7F7] placeholder-zinc-600 max-h-40"
                   />
                   <button
                     type="submit"
                     disabled={loading || !input.trim()}
-                    className="px-4 py-2 rounded-xl bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-sm font-medium text-white shrink-0"
+                    className="px-3 py-1.5 rounded bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-[12px] font-medium text-white shrink-0"
                   >
-                    Send
+                    send
                   </button>
                 </form>
-                <p className="text-[10px] text-zinc-600 mt-2 text-center">
-                  {unlock.unlocked ? `Unlocked · ${unlock.address?.slice(0, 10)}…` : 'Wallet locked — unlock in sidebar to trade'}
-                  {cfg ? ` · ${cfg.model}` : ''}
+                <p className="font-mono text-[10px] text-zinc-700 mt-2 text-center">
+                  {unlock.unlocked ? `wallet ${unlock.address?.slice(0, 12)}… unlocked` : 'wallet locked — unlock in sidebar to trade'}
+                  {cfg ? ` · ${cfg.model}` : ' · no model configured'}
                 </p>
               </div>
             </div>
