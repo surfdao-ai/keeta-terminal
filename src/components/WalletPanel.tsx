@@ -14,6 +14,9 @@ import {
 } from '@/lib/vault';
 import { generateSeedOnDevice, addressFromSeedOnDevice } from '@/lib/keeta/device';
 
+/** Keeta addresses are 'keeta_' plus 63 base58 characters. */
+const ADDRESS_RE = /^keeta_[a-z0-9]{40,}$/;
+
 interface WalletPanelProps {
   address: string | null;
   /** The seed held in memory for this session; null = locked. */
@@ -55,11 +58,55 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
       // Only default to the passkey when the browser says PRF works. Where it
       // is unknown (Safari) the passphrase is the safe default.
       setSealMode(support === 'yes' ? 'passkey' : 'passphrase');
+
+      // Reconcile: a vault sealed on this device but not yet known to the
+      // server registers itself now, so a failed registration heals itself.
+      if (rec?.address && !address) {
+        try {
+          const r = await fetch('/api/wallet', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'register', address: rec.address }),
+          });
+          if (r.ok) {
+            const j = await r.json();
+            onRegistered(j.wallet?.address ?? rec.address);
+          }
+        } catch {
+          /* the retry button in the address card is the fallback */
+        }
+      }
     })();
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Derive the address in the browser; null when the client cannot do it. */
+  async function deriveLocally(seed: string): Promise<string | null> {
+    try {
+      const addr = await addressFromSeedOnDevice(seed);
+      return ADDRESS_RE.test(addr) ? addr : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Derive the address server-side (the seed is read, never stored). */
+  async function deriveOnServer(seed: string): Promise<string> {
+    const r = await fetch('/api/wallet', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'derive', seed }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'could not derive the address');
+    if (!ADDRESS_RE.test(String(j.address ?? ''))) {
+      throw new Error('The derived address was not a valid Keeta address.');
+    }
+    return j.address;
+  }
 
   async function register(addressToRegister: string) {
     const r = await fetch('/api/wallet', {
@@ -82,7 +129,7 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
       let addr = '';
       try {
         seed = await generateSeedOnDevice();
-        addr = await addressFromSeedOnDevice(seed);
+        addr = (await deriveLocally(seed)) ?? (await deriveOnServer(seed));
       } catch {
         // The browser could not run the Keeta client — fall back to the
         // server generating it once. It is handed over and never stored.
@@ -97,10 +144,15 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
         addr = j.address;
         setMsg('generated on the server (this browser cannot run the Keeta client) — it is still never stored');
       }
+
       setNewSeed(seed);
       setPendingAddress(addr);
-      setStep('show-seed');
+
+      // Register the public address *before* showing the seed. If this fails
+      // the wallet is not usable yet, so the flow stops here with the seed
+      // kept for a retry instead of pretending it worked.
       await register(addr);
+      setStep('show-seed');
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -122,6 +174,8 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
       writeVault(rec);
       setVault(rec);
       onSeed(newSeed);
+      // Register again in case the earlier attempt did not land.
+      await register(pendingAddress);
       setNewSeed('');
       setPendingAddress('');
       setPassphrase('');
@@ -154,21 +208,7 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
     try {
       const trimmed = importSeed.trim();
       if (!trimmed) throw new Error('paste your seed first');
-      let addr = '';
-      try {
-        addr = await addressFromSeedOnDevice(trimmed);
-      } catch {
-        // This browser cannot run the Keeta client — let the server derive the
-        // address. The seed is only read for that request and never stored.
-        const r = await fetch('/api/wallet', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'derive', seed: trimmed }),
-        });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error || 'could not derive the address');
-        addr = j.address;
-      }
+      const addr = (await deriveLocally(trimmed)) ?? (await deriveOnServer(trimmed));
       await register(addr);
       setImportSeed('');
       setStep('seal');
@@ -214,6 +254,9 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
     setMsg('vault removed from this device (your written-down seed still works)');
   }
 
+  const shownAddress = address || vault?.address || '';
+  const notRegistered = Boolean(vault?.address) && !address;
+
   const vaultLabel = vault
     ? vault.mode === 'passkey'
       ? 'sealed with a passkey'
@@ -222,9 +265,30 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
 
   return (
     <div className="space-y-4">
+      {err && (
+        <div className="rounded-2xl border border-red-800/70 bg-red-950/30 px-4 py-3 text-xs text-red-300">
+          {err}
+        </div>
+      )}
+      {msg && <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/20 px-4 py-3 text-xs text-emerald-300">{msg}</div>}
+
       <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
-        <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">Address</div>
-        <div className="font-mono text-sm break-all">{address || 'No wallet yet'}</div>
+        <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">Wallet address</div>
+        <div className="font-mono text-sm break-all">{shownAddress || 'No wallet yet'}</div>
+        {notRegistered && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-amber-400">
+            <span>Sealed on this device but not registered with the server yet.</span>
+            <button
+              onClick={() => {
+                if (vault?.address) void register(vault.address);
+              }}
+              disabled={busy}
+              className="px-2 py-1 rounded border border-amber-700/70 hover:bg-amber-950/40 disabled:opacity-50"
+            >
+              retry
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
@@ -411,8 +475,6 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
         </div>
       )}
 
-      {msg && <p className="text-xs text-emerald-400">{msg}</p>}
-      {err && <p className="text-xs text-red-400">{err}</p>}
     </div>
   );
 }

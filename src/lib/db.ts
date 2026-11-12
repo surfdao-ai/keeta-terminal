@@ -99,6 +99,7 @@ interface PgDB extends KVBackend {
 }
 
 let pgPromise: Promise<PgDB> | null = null;
+let pgSchema: Promise<void> | null = null;
 
 async function getPostgres(): Promise<PgDB> {
   if (!pgPromise) {
@@ -113,9 +114,6 @@ async function getPostgres(): Promise<PgDB> {
         // Pooler-safe: no server-side prepared statements.
         prepare: false,
       });
-      await sql`CREATE TABLE IF NOT EXISTS kt_store (key text primary key, value jsonb not null, rev integer not null default 0, updated timestamptz not null default now())`;
-      // Deployments before the revision column existed still have rows.
-      await sql`ALTER TABLE kt_store ADD COLUMN IF NOT EXISTS rev integer not null default 0`;
       return {
         sql,
         async read<T>(key: string) {
@@ -147,6 +145,30 @@ async function getPostgres(): Promise<PgDB> {
     })();
   }
   return pgPromise;
+}
+
+/**
+ * Create the table once per process.
+ *
+ * Running DDL on every request cost two round trips and flooded the logs with
+ * "relation already exists" notices.
+ */
+async function ensurePostgresSchema(): Promise<void> {
+  if (!pgSchema) {
+    pgSchema = (async () => {
+      const db = await getPostgres();
+      const sql = db.sql as {
+        (strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown[]>;
+      };
+      await sql`CREATE TABLE IF NOT EXISTS kt_store (key text primary key, value jsonb not null, rev integer not null default 0, updated timestamptz not null default now())`;
+      // Deployments before the revision column existed still have rows.
+      await sql`ALTER TABLE kt_store ADD COLUMN IF NOT EXISTS rev integer not null default 0`;
+    })().catch((e) => {
+      pgSchema = null; // retry on the next request
+      throw e;
+    });
+  }
+  return pgSchema;
 }
 
 function hasPostgres(): boolean {
@@ -296,7 +318,10 @@ function selectedBackend(): BackendName {
 
 async function backend(): Promise<KVBackend> {
   const name = selectedBackend();
-  if (name === 'postgres') return getPostgres();
+  if (name === 'postgres') {
+    await ensurePostgresSchema();
+    return getPostgres();
+  }
   if (name === 'blob') return blobDB;
   // A read-only runtime means the file store cannot work at all: surface the
   // misconfiguration instead of silently losing every write.

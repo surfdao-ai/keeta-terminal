@@ -22,7 +22,8 @@ export interface StoredWallet {
 
 const KEY = 'wallet';
 
-const ADDRESS_RE = /^keeta_[a-z0-9]{40,}$/;
+/** Keeta addresses: 'keeta_' + base58. Be lenient about the alphabet. */
+const ADDRESS_RE = /^keeta_[1-9A-HJ-NP-Za-km-z]{32,}$/;
 
 export async function hasWallet(): Promise<boolean> {
   return Boolean(await getWallet());
