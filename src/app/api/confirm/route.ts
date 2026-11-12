@@ -4,6 +4,7 @@ import { userClient, loadFXClient, decimalsFromMetadata, toDisplay, fromDisplay,
 import { getSession } from '@/lib/agent/session';
 import { loadPending, removePending, appendTrade, capSpent, addCapSpend, dailyCapUsd, isExpired } from '@/lib/agent/safety';
 import { unlockWallet } from '@/lib/keeta/wallet';
+import { launchToken } from '@/lib/keeta/tokens';
 
 
 export async function POST(req: Request) {
@@ -27,6 +28,37 @@ export async function POST(req: Request) {
     const { account, address } = await unlockWallet(session.passphrase);
     const { fromToken: from, toToken: to, amount, affinity } = pending;
 
+    // ---- token launch path (native tokenization, no contract) ----
+    if (pending.kind === 'token') {
+      if (!pending.token) {
+        await removePending(tradeId);
+        return NextResponse.json({ error: 'Invalid token launch request.' }, { status: 400 });
+      }
+      const result = await launchToken(account, pending.token);
+      await removePending(tradeId);
+      await appendTrade({
+        id: tradeId,
+        kind: 'token',
+        fromToken: '',
+        toToken: result.address,
+        amount: pending.token.supply,
+        affinity: 'from',
+        convertedAmount: '0',
+        provider: 'native-tokenization',
+        exchangeId: null,
+        createdAt: new Date().toISOString(),
+        status: 'executed',
+        capSpentUsd: 0,
+        token: {
+          address: result.address,
+          symbol: result.symbol,
+          supply: result.supply,
+          decimals: result.decimals,
+        },
+      });
+      return NextResponse.json({ ok: true, kind: 'token', token: result });
+    }
+
     // Cap check: estimate USD value of the from side
     const fromInfo = await getTokenInfo(from).catch(() => ({ decimals: null }));
     const toInfo = await getTokenInfo(to).catch(() => ({ decimals: null }));
@@ -40,6 +72,7 @@ export async function POST(req: Request) {
       await removePending(tradeId);
       await appendTrade({
         id: tradeId,
+        kind: 'swap',
         fromToken: from,
         toToken: to,
         amount,
@@ -80,6 +113,7 @@ export async function POST(req: Request) {
     if (usdValue > 0) await addCapSpend(usdValue);
     await appendTrade({
       id: tradeId,
+      kind: 'swap',
       fromToken: from,
       toToken: to,
       amount,
@@ -104,6 +138,7 @@ export async function POST(req: Request) {
     await removePending(tradeId).catch(() => {});
     await appendTrade({
       id: tradeId,
+      kind: 'swap',
       fromToken: pending.fromToken,
       toToken: pending.toToken,
       amount: pending.amount,

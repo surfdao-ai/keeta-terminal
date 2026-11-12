@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import ToolCard from '@/components/ToolCard';
+import PwaRegister, { type BeforeInstallPromptEvent } from '@/components/PwaRegister';
 
 type ProviderConfig = {
   type: 'gateway' | 'openai-compatible';
@@ -55,6 +56,8 @@ export default function Home() {
 
   const [view, setView] = useState<View>('chat');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [navOpen, setNavOpen] = useState(false);
+  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
 
   const [unlock, setUnlock] = useState({ hasWallet: false, address: null as string | null, unlocked: false });
   const [passphrase, setPassphrase] = useState('');
@@ -179,10 +182,33 @@ export default function Home() {
   const cap = state?.cap;
 
   return (
-    <div className="flex h-screen bg-[#09090B] text-[#F7F7F7]">
+    <div className="flex h-[100dvh] bg-[#09090B] text-[#F7F7F7]">
+      {/* mobile top bar */}
+      <div className="md:hidden fixed top-0 inset-x-0 z-30 h-12 flex items-center gap-3 px-3 bg-[#141416]/95 backdrop-blur border-b border-zinc-800/80 pt-[env(safe-area-inset-top)]">
+        <button
+          onClick={() => setNavOpen(!navOpen)}
+          aria-label="Toggle navigation"
+          className="w-9 h-9 flex items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 active:bg-zinc-800"
+        >
+          ☰
+        </button>
+        <span className="font-mono text-[13px] font-semibold">kterminal</span>
+        <span className="ml-auto font-mono text-[10px] text-zinc-500 truncate max-w-[45%]">
+          {unlock.unlocked ? 'wallet unlocked' : 'wallet locked'}
+        </span>
+      </div>
+
+      {/* mobile backdrop */}
+      {navOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-30 bg-black/60"
+          onClick={() => setNavOpen(false)}
+        />
+      )}
+
       {/* sidebar */}
       <aside
-        className={`${sidebarOpen ? 'w-[250px]' : 'w-16'} shrink-0 border-r border-zinc-800/80 bg-[#141416] flex flex-col transition-all duration-200`}
+        className={`${sidebarOpen ? 'md:w-[250px]' : 'md:w-16'} w-[250px] shrink-0 border-r border-zinc-800/80 bg-[#141416] flex flex-col transition-all duration-200 fixed md:static inset-y-0 left-0 z-40 md:z-auto pt-12 md:pt-0 ${navOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       >
         <div className="h-14 flex items-center px-4 border-b border-zinc-800/80 gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-600 to-indigo-800 flex items-center justify-center font-bold text-white text-sm shrink-0">K</div>
@@ -193,7 +219,7 @@ export default function Home() {
         </div>
 
         <button
-          onClick={() => { setView('chat'); }}
+          onClick={() => { setView('chat'); setNavOpen(false); }}
           className="mx-3 mt-3 px-3 py-2 rounded-lg bg-purple-900/40 border border-purple-700/60 font-mono text-[13px] text-purple-200 hover:bg-purple-900/60 flex items-center gap-2"
         >
           <span className="text-purple-400">+</span>
@@ -205,7 +231,7 @@ export default function Home() {
           {NAV.map((n) => (
             <button
               key={n.id}
-              onClick={() => setView(n.id)}
+              onClick={() => { setView(n.id); setNavOpen(false); }}
               className={`w-full px-3 py-2 rounded-lg font-mono text-[13px] flex items-center gap-3 transition ${
                 view === n.id
                   ? 'bg-[#4C1D95] text-white'
@@ -218,9 +244,21 @@ export default function Home() {
           ))}
         </nav>
 
-        <div className="px-3 py-3 border-t border-zinc-800/80 font-mono text-[11px] text-zinc-600 space-y-1">
+        <div className="px-3 py-3 border-t border-zinc-800/80 font-mono text-[11px] text-zinc-600 space-y-1 pb-[env(safe-area-inset-bottom)]">
           {sidebarOpen && (
             <>
+              {installEvent && (
+                <button
+                  onClick={async () => {
+                    await installEvent.prompt();
+                    await installEvent.userChoice;
+                    setInstallEvent(null);
+                  }}
+                  className="w-full mb-2 px-2 py-1.5 rounded bg-purple-900/40 border border-purple-700/60 text-purple-200"
+                >
+                  install app
+                </button>
+              )}
               <a href="https://docs.keeta.com" target="_blank" rel="noreferrer" className="block hover:text-zinc-300">docs</a>
               <a href="https://github.com/surfdao-ai/keeta-terminal" target="_blank" rel="noreferrer" className="block hover:text-zinc-300">github</a>
               <div className="pt-1 text-zinc-700">v1.0.0 · keeta mainnet</div>
@@ -230,7 +268,7 @@ export default function Home() {
       </aside>
 
       {/* main */}
-      <main className="flex-1 flex flex-col min-w-0 bg-[#09090B]">
+      <main className="flex-1 flex flex-col min-w-0 bg-[#09090B] pt-12 md:pt-0">
         {view === 'chat' && (
           <>
             <div ref={scrollRef} className="flex-1 overflow-y-auto">
@@ -270,7 +308,7 @@ export default function Home() {
                   </div>
                 </div>
               ) : (
-                <div className="max-w-4xl mx-auto px-5 py-6">
+                <div className="max-w-4xl mx-auto px-3 sm:px-5 py-4 sm:py-6">
                   {/* terminal window chrome */}
                   <div className="bg-[#0d0d10] border border-zinc-800 rounded-lg overflow-hidden shadow-[0_0_60px_-20px_rgba(76,29,149,0.5)]">
                     <div className="flex items-center gap-2 px-4 py-2 bg-[#141416] border-b border-zinc-800">
@@ -345,7 +383,7 @@ export default function Home() {
               )}
             </div>
 
-            <div className="border-t border-zinc-800/80 p-4 bg-[#09090B]">
+            <div className="border-t border-zinc-800/80 p-3 sm:p-4 bg-[#09090B] pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-4">
               <div className="max-w-4xl mx-auto">
                 <form
                   onSubmit={(e) => {
@@ -545,6 +583,8 @@ export default function Home() {
           </form>
         </div>
       )}
+
+      <PwaRegister onInstallPrompt={setInstallEvent} />
     </div>
   );
 }

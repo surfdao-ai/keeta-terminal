@@ -61,6 +61,7 @@ CAPABILITIES:
 - get_estimate      — non-binding price estimate
 - get_binding_quote — binding (signed) quote; may be unavailable
 - propose_trade     — creates a pending trade; the user confirms it in the UI
+- propose_token_launch — launches a NEW native Keeta token (symbol, name, supply, decimals); user confirms
 - get_trade_history — executed/failed trades
 - get_cap_status    — spend vs daily cap
 - ks_* tools        — read-only KeeSpecs market data (price, providers, tokens)
@@ -72,7 +73,8 @@ SAFETY RULES (non-negotiable):
 4. Surface remaining daily budget when proposing.
 5. Keeta has no AMM/DEX — liquidity comes from FX anchor providers. If none quote a pair, report it.
 6. Never ask for or repeat the passphrase or seed.
-7. If the wallet is locked, tell the user to unlock in the sidebar.`;
+7. If the wallet is locked, tell the user to unlock in the sidebar.
+8. Token launches are native to Keeta (no contract). Initial supply is minted to the creator and needs KTA for fees.`;
 
 export async function POST(req: Request) {
   const body = (await req.json()) as { messages: UIMessage[]; providerConfig?: ProviderConfig };

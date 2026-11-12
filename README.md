@@ -4,12 +4,14 @@ An AI chat trading terminal for the Keeta Network — a bnkr.bot-style agent, bu
 
 ## Features
 
-- Streaming AI chat (Vercel AI Gateway) with Keeta-specific tools
+- Streaming AI chat (any provider) with Keeta-specific tools
 - Non-custodial wallet: passphrase-encrypted seed, AES-256-GCM, stored server-side
 - Atomic swaps via Keeta FX anchors (propose → confirm on every trade)
+- **Token launches** — create new native Keeta tokens from chat (no contract; supply minted to creator)
 - Hard daily spend cap enforced in code before any block is signed
 - Read-only Keeta market data via KeeSpecs MCP (prices, providers, tokens)
 - Trade history log
+- **PWA** — installable, offline shell, mobile-first layout
 
 ## Requirements
 
@@ -56,6 +58,28 @@ Confirm trades in the UI. The daily cap defaults to $100 and is enforced before 
 - The agent wallet lives in server memory while unlocked; on a cold start (new serverless instance) you must unlock again.
 - x402 paid reads (KeeSpecs deep analytics) are not wired in v1 — only free reads are exposed to the agent.
 
+## Token launches
+
+Keeta tokens are created natively on the ledger (CREATE_IDENTIFIER) with attributes, metadata and rules — there is no contract to deploy. From chat:
+
+```
+launch a token called KTW, ticker KTW, supply 1000000, 18 decimals
+```
+
+The agent proposes it, you confirm, and the terminal creates the token, mints the full supply to your wallet, and writes `decimalPlaces` metadata so every client renders balances correctly. Creating a token needs KTA in the wallet for network fees.
+
+Regenerate PWA icons after changing `public/icon.svg`:
+
+```bash
+node scripts/generate-icons.mjs
+```
+
+## PWA
+
+- `public/manifest.webmanifest` — installable, standalone, maskable icon
+- `public/sw.js` — app-shell caching (API requests are never cached)
+- iOS: Share → Add to Home Screen
+
 ## Stack
 
-Next.js 16 (App Router) · AI SDK 7 · Vercel AI Gateway · @keetanetwork/keetanet-client · @keetanetwork/anchor · KeeSpecs MCP · Postgres (optional)
+Next.js 16 (App Router) · AI SDK 7 · Vercel AI Gateway / any OpenAI-compatible provider · @keetanetwork/keetanet-client · @keetanetwork/anchor · KeeSpecs MCP · Postgres (optional)

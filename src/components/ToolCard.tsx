@@ -17,6 +17,7 @@ const PRETTY: Record<string, string> = {
   get_estimate: 'estimate',
   get_binding_quote: 'quote',
   propose_trade: 'propose',
+  propose_token_launch: 'launch token',
   get_trade_history: 'history',
   get_cap_status: 'cap',
 };
@@ -47,13 +48,14 @@ export default function ToolCard({ name, state, input, output, onConfirm }: Tool
   const [confirming, setConfirming] = useState(false);
 
   const running = state !== 'output-available';
-  const tradeId = (output as { tradeId?: string } | null)?.tradeId;
+  const out = output as { tradeId?: string; tokenLaunchId?: string } | null;
+  const actionId = out?.tradeId || out?.tokenLaunchId;
   const label = PRETTY[name] || name;
 
   async function handleConfirm() {
-    if (!tradeId) return;
+    if (!actionId) return;
     setConfirming(true);
-    onConfirm(tradeId, (r) => {
+    onConfirm(actionId, (r) => {
       setConfirmResult(r);
       setConfirming(false);
     });
@@ -91,7 +93,7 @@ export default function ToolCard({ name, state, input, output, onConfirm }: Tool
       )}
 
       {/* confirm action */}
-      {name === 'propose_trade' && tradeId && !confirmResult && (
+      {(name === 'propose_trade' || name === 'propose_token_launch') && actionId && !confirmResult && (
         <div className="ml-4 mt-1 flex items-center gap-3">
           <button
             disabled={confirming}

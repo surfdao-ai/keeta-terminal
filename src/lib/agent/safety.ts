@@ -1,19 +1,31 @@
 /**
- * Safety rails for mainnet: pending trades, daily cap, quote revalidation.
+ * Safety rails for mainnet: pending actions, daily cap, quote revalidation.
  */
 import { dbRead, dbWrite } from '../db';
 
+export interface TokenLaunchSpec {
+  name: string;
+  symbol: string;
+  description: string;
+  supply: string;
+  decimals: number;
+}
+
 export interface PendingTrade {
   id: string;
+  kind: 'swap' | 'token';
   fromToken: string;
   toToken: string;
-  amount: string; // display amount in from-token units
+  amount: string;
   affinity: 'from' | 'to';
+  token?: TokenLaunchSpec;
   createdAt: number;
   expiresAt: number;
 }
 
-export function newPendingTrade(input: Omit<PendingTrade, 'id' | 'createdAt' | 'expiresAt'>): PendingTrade {
+export function newPendingTrade(
+  input: Omit<PendingTrade, 'id' | 'createdAt' | 'expiresAt'>,
+): PendingTrade {
   const now = Date.now();
   return { ...input, id: crypto.randomUUID(), createdAt: now, expiresAt: now + 60_000 };
 }
@@ -30,7 +42,6 @@ export async function loadPending(id: string): Promise<PendingTrade | null> {
 export async function savePending(t: PendingTrade): Promise<void> {
   const all = (await dbRead<PendingTrade[]>('pendingTrades')) ?? [];
   all.unshift(t);
-  // keep last 50
   await dbWrite('pendingTrades', all.slice(0, 50));
 }
 
@@ -41,6 +52,7 @@ export async function removePending(id: string): Promise<void> {
 
 export interface TradeRecord {
   id: string;
+  kind: 'swap' | 'token';
   fromToken: string;
   toToken: string;
   amount: string;
@@ -52,6 +64,7 @@ export interface TradeRecord {
   status: 'executed' | 'failed';
   error?: string;
   capSpentUsd: number;
+  token?: { address: string; symbol: string; supply: string; decimals: number };
 }
 
 export async function appendTrade(r: TradeRecord): Promise<void> {

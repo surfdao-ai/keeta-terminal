@@ -4,6 +4,7 @@ import * as KeetaNet from '@keetanetwork/keetanet-client';
 import { networkAlias, userClient, loadFXClient, decimalsFromMetadata, toDisplay, fromDisplay, getTokenInfo, summarizeQuote, normalizeToken } from '../keeta/network';
 import { unlockWallet } from '../keeta/wallet';
 import { newPendingTrade, savePending, listTrades, capSpent, dailyCapUsd } from './safety';
+import { validateTokenSpec } from '../keeta/tokens';
 
 export interface ToolContext {
   passphrase: string | null; // null = locked
@@ -155,7 +156,7 @@ export function buildTools(ctx: ToolContext) {
       execute: async ({ from, to, amount, affinity }) => {
         const f = normalizeToken(from);
         const t = normalizeToken(to);
-        const pending = newPendingTrade({ fromToken: f, toToken: t, amount, affinity });
+        const pending = newPendingTrade({ kind: 'swap', fromToken: f, toToken: t, amount, affinity });
         await savePending(pending);
         // best-effort estimate for display
         let preview: unknown = null;
@@ -172,6 +173,38 @@ export function buildTools(ctx: ToolContext) {
           preview = null;
         }
         return { tradeId: pending.id, expiresAt: pending.expiresAt, preview };
+      },
+    }),
+
+    propose_token_launch: tool({
+      description:
+        'Propose launching a new native Keeta token (symbol, name, total supply, decimals). Does NOT execute — the user confirms in the UI. Use this when the user wants to create/launch a token, coin, or memecoin on Keeta.',
+      inputSchema: z.object({
+        symbol: z.string().describe('Ticker symbol, 1-12 alphanumeric characters (e.g. KTAW)'),
+        name: z.string().describe('Display name of the token'),
+        supply: z.string().describe('Total supply in display units (e.g. 1000000)'),
+        decimals: z.number().int().min(0).max(18).default(18).describe('Decimal places (usually 18)'),
+        description: z.string().default('').describe('Short description / metadata'),
+      }),
+      execute: async ({ symbol, name, supply, decimals, description }) => {
+        const spec = { name, symbol, description, supply, decimals };
+        const invalid = validateTokenSpec(spec);
+        if (invalid) return { error: invalid };
+        const pending = newPendingTrade({
+          kind: 'token',
+          fromToken: '',
+          toToken: '',
+          amount: supply,
+          affinity: 'from',
+          token: spec,
+        });
+        await savePending(pending);
+        return {
+          tokenLaunchId: pending.id,
+          expiresAt: pending.expiresAt,
+          spec,
+          note: 'Token will be created natively on Keeta (no contract). Initial supply is minted to your wallet.',
+        };
       },
     }),
 
