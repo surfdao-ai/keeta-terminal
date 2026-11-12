@@ -52,7 +52,9 @@ export default function Home() {
 
   const transport = new DefaultChatTransport({
     api: '/api/chat',
-    body: () => (cfg ? { providerConfig: cfg } : {}),
+    prepareSendMessagesRequest: ({ messages }) => ({
+      body: { messages, providerConfig: cfg ?? undefined },
+    }),
   });
   const { messages, sendMessage, status } = useChat({ transport });
 
