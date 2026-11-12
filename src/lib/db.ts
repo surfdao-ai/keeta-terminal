@@ -120,7 +120,12 @@ const blobDB: FileDB = {
   async read(key) {
     const { get } = await import('@vercel/blob');
     try {
-      const res = await get(blobPath(key), { access: 'private' });
+      const res = await get(blobPath(key), {
+        access: 'private',
+        // Pin the same store the writer uses; never fall back to OIDC/store-id
+        // resolution, which could point at a different store than the token.
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
       if (!res || res.statusCode !== 200) return null;
       const text = await new Response(res.stream).text();
       return JSON.parse(text) as unknown;
