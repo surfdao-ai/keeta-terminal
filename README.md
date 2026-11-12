@@ -27,7 +27,7 @@ chats. Three backends, picked automatically:
 
 | Backend | Selected when | Notes |
 |---|---|---|
-| Postgres | `DATABASE_URL` is set | `kt_store` key/value table, created on first use |
+| Postgres | `DATABASE_URL` is set | `kt_store` key/value table, created on first use. **Neon free tier** (no credit card). |
 | Vercel Blob | `BLOB_STORE_ID` is set | one private JSON object per key, OIDC or read-write token |
 | Local file | neither is set | `.data/terminal.json` — **development only** |
 
@@ -45,11 +45,14 @@ and the automation list honest when the cron tick and the UI write at the same
 time.
 
 ```bash
-vercel storage create kt-kv --type blob --access private
-vercel storage connect kt-kv --auth oidc
+vercel install neon --billing-plan free_v3 -e production -e preview
 ```
 
-`node scripts/blob-dump.mjs [storeId]` prints every key currently stored.
+Neon's free plan needs no credit card. It scales to zero when idle, so the
+first query after a pause can take a moment.
+
+`node scripts/blob-dump.mjs [storeId]` prints every key in a Blob store;
+`node scripts/migrate-blob-to-postgres.mjs` copies a Blob store into Postgres.
 
 ## Run locally
 
@@ -65,6 +68,7 @@ npm run dev
 On first load the terminal shows a **Model setup** dialog. Pick a provider and paste your key:
 
 - Vercel AI Gateway (uses server key / OIDC, or your own key) — *needs a credit card on the Vercel account*
+- **Free, no key (Pollinations)** — works immediately, no account, no card
 - OpenRouter
 - Groq
 - Together
@@ -95,7 +99,13 @@ Confirm trades in the UI. The daily cap defaults to $100 and is enforced before 
 
 - Keeta has no smart contracts / no AMM or DEX. Liquidity comes from FX anchor providers; if no provider issues a binding quote for a pair, the terminal refuses to execute rather than fake it.
 - Mainnet by default. Start with dust amounts.
-- The agent wallet lives in server memory while unlocked; on a cold start (new serverless instance) you must unlock again.
+- The unlock cookie is a passphrase sealed with a server key (AES-256-GCM), so the
+  session survives instance changes and the passphrase is never stored at rest on
+  the server. "Lock" drops the cookie in the browser — a copy taken before
+  locking stays valid until it expires (8 hours).
+- The Keeta skills come from the KeeSpecs MCP (`ks_list_skills`, `ks_read_skill`,
+  plus the `ks_*` data tools). The agent reaches them as soon as a provider and
+  a wallet are configured.
 - x402 paid reads (KeeSpecs deep analytics) are not wired in v1 — only free reads are exposed to the agent.
 - The Vercel AI Gateway needs a credit card on the account before it will serve
   requests (`vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card`).
