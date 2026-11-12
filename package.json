@@ -11,6 +11,7 @@
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.143",
     "@ai-sdk/mcp": "^2.0.97",
+    "@ai-sdk/openai-compatible": "^3.0.90",
     "@ai-sdk/react": "^4.0.174",
     "@keetanetwork/anchor": "^0.0.108",
     "@keetanetwork/keetanet-client": "^0.19.1",

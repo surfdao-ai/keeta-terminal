@@ -21,10 +21,24 @@ An AI chat trading terminal for the Keeta Network — a bnkr.bot-style agent, bu
 
 ```bash
 cp .env.example .env.local
-# edit .env.local: set AI_GATEWAY_API_KEY (and optionally KEETA_NETWORK=test, DAILY_SPEND_CAP_USD)
+# edit .env.local: set AI_GATEWAY_API_KEY (optional — users can paste their own key in the UI)
 npm install
 npm run dev
 ```
+
+## Model setup (any provider)
+
+On first load the terminal shows a **Model setup** dialog. Pick a provider and paste your key:
+
+- Vercel AI Gateway (uses server key / OIDC, or your own key)
+- OpenRouter
+- Groq
+- Together
+- Ollama (local)
+- LM Studio (local)
+- Custom OpenAI-compatible endpoint
+
+The key is stored only in your browser (localStorage) and sent per request — never persisted server-side. You can reopen setup anytime via the "Model setup" button.
 
 Open http://localhost:3000, create a wallet with a strong passphrase, then ask:
 

@@ -11,6 +11,8 @@ import {
 } from 'ai';
 import { getSession } from '@/lib/agent/session';
 import { buildTools } from '@/lib/agent/tools';
+import { buildModel } from '@/lib/llm';
+import type { ProviderConfig } from '@/lib/llm';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -63,11 +65,18 @@ Safety rules you must follow:
 When the wallet is locked, portfolio and trade tools will return an error — guide the user to unlock.`;
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as { messages: UIMessage[] };
+  const body = (await req.json()) as { messages: UIMessage[]; providerConfig?: ProviderConfig };
   const cookie = req.headers.get('cookie') ?? '';
   const sid = cookie.match(/kt_sid=([^;]+)/)?.[1];
   const session = getSession(sid);
   const passphrase = session?.passphrase ?? null;
+
+  let model;
+  try {
+    model = buildModel(body.providerConfig ?? null);
+  } catch (e) {
+    return new Response(JSON.stringify({ error: (e as Error).message }), { status: 400, headers: { 'content-type': 'application/json' } });
+  }
 
   const tools: ToolSet = buildTools({ passphrase }) as ToolSet;
 
@@ -84,7 +93,7 @@ export async function POST(req: Request) {
   }
 
   const result = streamText({
-    model: gateway(process.env.AI_MODEL || 'anthropic/claude-sonnet-4.5'),
+    model,
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(body.messages),
     tools,
