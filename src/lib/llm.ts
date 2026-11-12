@@ -113,7 +113,30 @@ function repairingFetch(base: ProviderFetch): ProviderFetch {
       }),
     );
 
-    return new Response(stream, { status: res.status, headers: res.headers });
+    // Build fresh headers: the body was re-encoded, so the upstream
+    // content-length no longer applies, and the original Headers object may
+    // come from a different realm than the runtime's Response.
+    const headers = new Headers();
+    try {
+      res.headers.forEach((value, key) => {
+        if (key === 'content-length' || key === 'content-encoding') return;
+        headers.set(key, value);
+      });
+    } catch {
+      /* fall back to the default headers */
+    }
+    console.error(
+      '[wrap-debug] upstream headers ctor=',
+      (res.headers as { constructor?: { name?: string } })?.constructor?.name,
+      'iterable=',
+      typeof (res.headers as unknown as Record<symbol, unknown>)?.[Symbol.iterator],
+      '| new headers ctor=',
+      headers.constructor?.name,
+      '| Response ctor=',
+      Response.name,
+    );
+
+    return new Response(stream, { status: res.status, statusText: res.statusText, headers });
   }) as ProviderFetch;
 }
 
@@ -130,7 +153,8 @@ export function buildModel(cfg: ProviderConfig | null): LanguageModel {
     name: cfg.name || 'custom',
     baseURL,
     apiKey: cfg.apiKey || '',
-    fetch: repairingFetch as unknown as NonNullable<
+    // Wrap the global fetch so streamed tool names can be repaired.
+    fetch: repairingFetch(fetch) as unknown as NonNullable<
       Parameters<typeof createOpenAICompatible>[0]['fetch']
     >,
   });

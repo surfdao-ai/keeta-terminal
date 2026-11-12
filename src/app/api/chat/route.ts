@@ -14,7 +14,9 @@ import { buildTools } from '@/lib/agent/tools';
 import { buildModel } from '@/lib/llm';
 import type { ProviderConfig } from '@/lib/llm';
 
-export const maxDuration = 60;
+// Reasoning models can take a while before the first token; give the stream
+// room to finish instead of cutting it off mid-answer.
+export const maxDuration = 120;
 
 const ALLOWED_MCP_TOOLS = new Set([
   'get_account',
