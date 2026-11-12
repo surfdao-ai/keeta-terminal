@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useChat } from '@ai-sdk/react';
+import { DefaultChatTransport } from 'ai';
 import ToolCard from '@/components/ToolCard';
 
 type ProviderConfig = {
@@ -49,7 +50,11 @@ export default function Home() {
   const [msg, setMsg] = useState('');
   const [input, setInput] = useState('');
 
-  const { messages, sendMessage, status } = useChat({ body: cfg ? { providerConfig: cfg } : undefined });
+  const transport = new DefaultChatTransport({
+    api: '/api/chat',
+    body: () => (cfg ? { providerConfig: cfg } : {}),
+  });
+  const { messages, sendMessage, status } = useChat({ transport });
 
   useEffect(() => {
     const c = loadCfg();
