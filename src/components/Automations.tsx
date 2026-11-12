@@ -1,0 +1,395 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+
+interface Automation {
+  id: string;
+  kind: 'alert' | 'recurring';
+  name: string;
+  enabled: boolean;
+  createdAt: string;
+  symbol?: string;
+  op?: 'gt' | 'lt';
+  valueUsd?: number;
+  lastCheckedAt?: string;
+  lastPriceUsd?: number;
+  triggeredAt?: string;
+  triggered?: boolean;
+  fromToken?: string;
+  toToken?: string;
+  amount?: string;
+  everyMinutes?: number;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  lastStatus?: string;
+  lastMessage?: string;
+}
+
+interface LogEntry {
+  id: string;
+  at: string;
+  kind: string;
+  status: string;
+  message: string;
+}
+
+interface WalletInfo {
+  address: string | null;
+  createdAt?: string;
+}
+
+interface Props {
+  unlocked: boolean;
+  onNotice: (msg: string) => void;
+}
+
+export default function Automations({ unlocked, onNotice }: Props) {
+  const [list, setList] = useState<Automation[]>([]);
+  const [log, setLog] = useState<LogEntry[]>([]);
+  const [wallet, setWallet] = useState<WalletInfo>({ address: null });
+  const [keyConfigured, setKeyConfigured] = useState(false);
+  const [minEvery, setMinEvery] = useState(15);
+  const [busy, setBusy] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  const [kind, setKind] = useState<'alert' | 'recurring'>('alert');
+  const [name, setName] = useState('');
+  const [symbol, setSymbol] = useState('KTA');
+  const [op, setOp] = useState<'gt' | 'lt'>('gt');
+  const [valueUsd, setValueUsd] = useState('1');
+  const [fromToken, setFromToken] = useState('USDC');
+  const [toToken, setToToken] = useState('KTA');
+  const [amount, setAmount] = useState('5');
+  const [everyMinutes, setEveryMinutes] = useState('60');
+
+  const load = useCallback(async () => {
+    const r = await fetch('/api/automations');
+    if (!r.ok) return;
+    const j = await r.json();
+    setList(j.automations ?? []);
+    setLog(j.log ?? []);
+    setWallet(j.wallet ?? { address: null });
+    setKeyConfigured(Boolean(j.automationKeyConfigured));
+    setMinEvery(j.minEveryMinutes ?? 15);
+  }, []);
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 20000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const payload =
+        kind === 'alert'
+          ? { kind, name, symbol, op, valueUsd: Number(valueUsd) }
+          : { kind, name, fromToken, toToken, amount, everyMinutes: Number(everyMinutes) };
+      const r = await fetch('/api/automations', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'failed');
+      setName('');
+      await load();
+      onNotice(`ok  created ${kind}`);
+    } catch (err) {
+      onNotice(`err  ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggle(id: string) {
+    const r = await fetch('/api/automations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'toggle', id }),
+    });
+    const j = await r.json();
+    if (!r.ok) return onNotice(`err  ${j.error}`);
+    await load();
+  }
+
+  async function remove(id: string) {
+    const r = await fetch('/api/automations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', id }),
+    });
+    const j = await r.json();
+    if (!r.ok) return onNotice(`err  ${j.error}`);
+    await load();
+  }
+
+  async function runNow() {
+    setRunning(true);
+    try {
+      const r = await fetch('/api/automations/run', { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'failed');
+      onNotice(`ok  checked ${j.checked} · triggered ${j.triggered} · executed ${j.executed} · failed ${j.failed}`);
+      await load();
+    } catch (err) {
+      onNotice(`err  ${(err as Error).message}`);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function createWallet() {
+    const r = await fetch('/api/automations/wallet', { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) return onNotice(`err  ${j.error}`);
+    await load();
+    onNotice('ok  automation wallet created — fund it to enable swaps');
+  }
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      {/* automation wallet */}
+      <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-mono text-[13px] font-semibold">automation wallet</h2>
+          <span className="font-mono text-[10px] text-zinc-600">
+            {keyConfigured ? 'key configured' : 'AUTOMATION_KEY missing'}
+          </span>
+        </div>
+        {wallet.address ? (
+          <div className="space-y-2">
+            <div className="font-mono text-[11px] text-zinc-400 break-all">{wallet.address}</div>
+            <p className="text-[11px] text-zinc-600">
+              Unattended swaps run from this wallet only. Fund it with a small amount — that balance is the hard
+              ceiling on what any automation can move.
+            </p>
+            <button
+              onClick={() => navigator.clipboard?.writeText(wallet.address!)}
+              className="px-2 py-1 font-mono text-[11px] rounded bg-zinc-800 hover:bg-zinc-700"
+            >
+              copy address
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] text-zinc-600">
+              A separate account for scheduled swaps. Its seed is encrypted with the server key; your main wallet is
+              never used for unattended execution.
+            </p>
+            <button
+              onClick={createWallet}
+              disabled={!keyConfigured}
+              className="shrink-0 px-3 py-1.5 font-mono text-[12px] rounded bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-white"
+            >
+              create
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* create */}
+      <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-mono text-[13px] font-semibold">new automation</h2>
+          <button
+            onClick={runNow}
+            disabled={running}
+            className="font-mono text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50"
+          >
+            {running ? 'running...' : 'run now'}
+          </button>
+        </div>
+
+        <form onSubmit={create} className="space-y-3">
+          <div className="flex gap-1">
+            {(['alert', 'recurring'] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setKind(k)}
+                className={`px-3 py-1.5 rounded font-mono text-[12px] ${
+                  kind === k ? 'bg-[#4C1D95] text-white' : 'bg-zinc-800 text-zinc-400'
+                }`}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+
+          <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+            name (optional)
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={kind === 'alert' ? 'KTA above $1' : 'weekly DCA'}
+              className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm text-[#F7F7F7] focus:outline-none focus:border-purple-600"
+            />
+          </label>
+
+          {kind === 'alert' ? (
+            <div className="grid grid-cols-3 gap-2">
+              <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+                token
+                <input
+                  value={symbol}
+                  onChange={(e) => setSymbol(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+                condition
+                <select
+                  value={op}
+                  onChange={(e) => setOp(e.target.value as 'gt' | 'lt')}
+                  className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm"
+                >
+                  <option value="gt">above</option>
+                  <option value="lt">below</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+                usd
+                <input
+                  value={valueUsd}
+                  onChange={(e) => setValueUsd(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
+                />
+              </label>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+                from
+                <input
+                  value={fromToken}
+                  onChange={(e) => setFromToken(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+                to
+                <input
+                  value={toToken}
+                  onChange={(e) => setToToken(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+                amount
+                <input
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+                every (min)
+                <input
+                  type="number"
+                  min={minEvery}
+                  value={everyMinutes}
+                  onChange={(e) => setEveryMinutes(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
+                />
+              </label>
+            </div>
+          )}
+
+          <div className="flex items-center gap-3">
+            <button
+              disabled={busy || !unlocked}
+              className="px-4 py-2 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-sm font-medium text-white"
+            >
+              {busy ? '...' : 'create automation'}
+            </button>
+            {!unlocked && <span className="font-mono text-[11px] text-amber-400">unlock the wallet first</span>}
+          </div>
+        </form>
+      </div>
+
+      {/* list */}
+      <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
+        <h2 className="font-mono text-[13px] font-semibold mb-3">automations</h2>
+        {list.length === 0 && <p className="text-[12px] text-zinc-600">none yet</p>}
+        <div className="space-y-2">
+          {list.map((a) => (
+            <div key={a.id} className="border border-zinc-800 rounded-xl p-3">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-2 h-2 rounded-full ${a.enabled ? 'bg-emerald-500' : 'bg-zinc-700'}`}
+                  aria-hidden
+                />
+                <span className="font-mono text-[12px] text-zinc-200 truncate">{a.name}</span>
+                <span className="font-mono text-[10px] text-zinc-600">
+                  {a.kind === 'alert'
+                    ? `${a.symbol} ${a.op === 'gt' ? '>' : '<'} $${a.valueUsd}`
+                    : `${a.amount} ${String(a.fromToken).slice(0, 10)}… → ${String(a.toToken).slice(0, 10)}… every ${a.everyMinutes}m`}
+                </span>
+                <button
+                  onClick={() => toggle(a.id)}
+                  className="ml-auto font-mono text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                >
+                  {a.enabled ? 'pause' : 'resume'}
+                </button>
+                <button
+                  onClick={() => remove(a.id)}
+                  className="font-mono text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-red-900/60"
+                >
+                  del
+                </button>
+              </div>
+              <div className="mt-1.5 font-mono text-[10px] text-zinc-600 space-y-0.5">
+                {a.kind === 'alert' && (
+                  <>
+                    <div>last price: {a.lastPriceUsd !== undefined ? `$${a.lastPriceUsd}` : '—'}</div>
+                    <div>checked: {a.lastCheckedAt ? new Date(a.lastCheckedAt).toLocaleString() : '—'}</div>
+                    {a.triggered && (
+                      <div className="text-amber-400">triggered: {a.triggeredAt ? new Date(a.triggeredAt).toLocaleString() : ''}</div>
+                    )}
+                  </>
+                )}
+                {a.kind === 'recurring' && (
+                  <>
+                    <div>next: {a.nextRunAt ? new Date(a.nextRunAt).toLocaleString() : '—'}</div>
+                    <div>
+                      last: {a.lastStatus ?? '—'}
+                      {a.lastMessage ? ` · ${a.lastMessage}` : ''}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* log */}
+      <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
+        <h2 className="font-mono text-[13px] font-semibold mb-3">activity</h2>
+        {log.length === 0 && <p className="text-[12px] text-zinc-600">no runs yet</p>}
+        <div className="space-y-1 font-mono text-[11px]">
+          {log.map((l) => (
+            <div key={l.id} className="flex gap-2">
+              <span className="text-zinc-600 shrink-0">{new Date(l.at).toLocaleTimeString()}</span>
+              <span
+                className={
+                  l.status === 'executed' || l.status === 'triggered'
+                    ? 'text-emerald-400'
+                    : l.status === 'failed'
+                      ? 'text-red-400'
+                      : 'text-zinc-400'
+                }
+              >
+                {l.status}
+              </span>
+              <span className="text-zinc-400 truncate">{l.message}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

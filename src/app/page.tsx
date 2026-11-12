@@ -5,6 +5,7 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import ToolCard from '@/components/ToolCard';
 import PwaRegister, { type BeforeInstallPromptEvent } from '@/components/PwaRegister';
+import Automations from '@/components/Automations';
 
 type ProviderConfig = {
   type: 'gateway' | 'openai-compatible';
@@ -69,6 +70,7 @@ export default function Home() {
   const [capInput, setCapInput] = useState('100');
   const [capSaving, setCapSaving] = useState(false);
   const [capMsg, setCapMsg] = useState('');
+  const [notice, setNotice] = useState('');
 
   const transport = new DefaultChatTransport({
     api: '/api/chat',
@@ -125,6 +127,22 @@ export default function Home() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, status]);
+
+  // While the app is open, evaluate automations more often than the 15m schedule.
+  useEffect(() => {
+    if (!unlock.unlocked) return;
+    const tick = () => {
+      fetch('/api/automations/run', { method: 'POST' }).catch(() => undefined);
+    };
+    const t = setInterval(tick, 60_000);
+    return () => clearInterval(t);
+  }, [unlock.unlocked]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(''), 5000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   function openSetup() {
     const c = cfg;
@@ -538,9 +556,13 @@ export default function Home() {
         )}
 
         {view === 'automations' && (
-          <div className="flex-1 overflow-y-auto p-8 max-w-2xl mx-auto w-full">
-            <h1 className="text-2xl font-bold mb-2">Automations</h1>
-            <p className="text-sm text-zinc-400">Scheduled and conditional trades. Coming soon.</p>
+          <div className="flex-1 overflow-y-auto p-4 sm:p-8 w-full">
+            <h1 className="text-2xl font-bold mb-1">Automations</h1>
+            <p className="text-sm text-zinc-500 mb-6">
+              Scheduled swaps and price alerts. Keeta has no on-chain scheduler, so these run on a Vercel schedule
+              (every 15m) and while the app is open.
+            </p>
+            <Automations unlocked={unlock.unlocked} onNotice={(m) => setNotice(m)} />
           </div>
         )}
 
@@ -651,6 +673,12 @@ export default function Home() {
               <button type="submit" className="px-4 py-2 rounded-lg bg-[#4C1D95] hover:bg-purple-700 text-sm font-medium text-white">Save & close</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {notice && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg bg-[#141416] border border-zinc-700 font-mono text-[12px] text-zinc-200 shadow-xl max-w-[90vw]">
+          {notice}
         </div>
       )}
 

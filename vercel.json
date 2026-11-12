@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "schedules": {
+    "automations-run": {
+      "schedule": "*/15 * * * *",
+      "timezone": "UTC",
+      "path": "/api/automations/run",
+      "requestMethod": "POST"
+    }
+  }
+}
