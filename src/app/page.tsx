@@ -172,7 +172,7 @@ export default function Home() {
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center font-bold text-black text-sm">K</div>
           <div>
-            <h1 className="text-base font-bold tracking-tight">Keeta Terminal</h1>
+            <h1 className="text-base font-bold tracking-tight">KTerminal</h1>
             <p className="text-[11px] text-zinc-500">AI trading · Keeta Network</p>
           </div>
         </div>
@@ -272,7 +272,7 @@ export default function Home() {
             {messages.length === 0 && (
               <div className="max-w-2xl mx-auto mt-10 text-center">
                 <div className="text-4xl mb-3">⚡</div>
-                <h2 className="text-xl font-bold mb-2">Keeta Terminal</h2>
+                <h2 className="text-xl font-bold mb-2">KTerminal</h2>
                 <p className="text-zinc-400 text-sm">Chat with your AI trading agent. Ask for balances, token lists, quotes, or propose a trade.</p>
                 <div className="mt-6 grid grid-cols-2 gap-2 text-xs">
                   {['What\'s my portfolio?', 'List tradable tokens', 'Estimate 1 KTA to USDC', 'Propose 0.1 KTA for USDC'].map((q) => (
@@ -357,47 +357,57 @@ export default function Home() {
       </div>
 
       {setupOpen && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <form onSubmit={saveSetup} className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md flex flex-col gap-4">
-            <h2 className="text-lg font-bold">Model setup</h2>
-            <p className="text-xs text-zinc-400">Choose any OpenAI-compatible provider or Vercel AI Gateway. Your key stays in your browser.</p>
-            <label className="flex flex-col gap-1 text-sm">
-              Provider
-              <select
-                value={presetId}
-                onChange={(e) => {
-                  const p = PRESETS.find((x) => x.id === e.target.value)!;
-                  setPresetId(p.id);
-                  setBaseUrl(p.baseUrl || '');
-                  setModel(p.defaultModel);
-                }}
-                className="px-3 py-2 rounded bg-zinc-800 border border-zinc-700"
-              >
-                {PRESETS.map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-            </label>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <form onSubmit={saveSetup} className="bg-[#0d0e13] border border-zinc-800 rounded-2xl p-7 w-full max-w-lg flex flex-col gap-5 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center font-bold text-black">K</div>
+              <div>
+                <h2 className="text-xl font-bold">Model setup</h2>
+                <p className="text-xs text-zinc-500">Choose a provider and paste your key. Stored only in your browser.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {PRESETS.map((p) => (
+                <button
+                  type="button"
+                  key={p.id}
+                  onClick={() => {
+                    setPresetId(p.id);
+                    setBaseUrl(p.baseUrl || '');
+                    setModel(p.defaultModel);
+                  }}
+                  className={`px-3 py-2.5 rounded-xl border text-sm font-medium text-left transition ${
+                    presetId === p.id
+                      ? 'bg-emerald-600/15 border-emerald-500 text-emerald-300'
+                      : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-600'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
             {preset.type === 'openai-compatible' && (
-              <>
-                <label className="flex flex-col gap-1 text-sm">
-                  Base URL
-                  <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className="px-3 py-2 rounded bg-zinc-800 border border-zinc-700" />
+              <div className="space-y-3">
+                <label className="flex flex-col gap-1.5 text-sm">
+                  <span className="text-zinc-400">Base URL</span>
+                  <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className="px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 focus:outline-none focus:border-emerald-500" />
                 </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  API key
-                  <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="px-3 py-2 rounded bg-zinc-800 border border-zinc-700" />
+                <label className="flex flex-col gap-1.5 text-sm">
+                  <span className="text-zinc-400">API key</span>
+                  <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 focus:outline-none focus:border-emerald-500" />
                 </label>
-              </>
+              </div>
             )}
-            <label className="flex flex-col gap-1 text-sm">
-              Model
-              <input value={model} onChange={(e) => setModel(e.target.value)} className="px-3 py-2 rounded bg-zinc-800 border border-zinc-700" />
+            <label className="flex flex-col gap-1.5 text-sm">
+              <span className="text-zinc-400">Model</span>
+              <input value={model} onChange={(e) => setModel(e.target.value)} className="px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 focus:outline-none focus:border-emerald-500" />
             </label>
-            <div className="flex gap-2 justify-end">
-              {cfg && <button type="button" onClick={() => { clearSetup(); }} className="px-3 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-sm">Clear</button>}
-              <button type="button" onClick={() => setSetupOpen(false)} className="px-3 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-sm">Cancel</button>
-              <button type="submit" className="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm font-medium">Save</button>
+            <div className="flex gap-2 justify-end pt-2">
+              {cfg && <button type="button" onClick={() => { clearSetup(); }} className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm">Clear</button>}
+              <button type="button" onClick={() => setSetupOpen(false)} className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm">Cancel</button>
+              <button type="submit" className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium">Save & close</button>
             </div>
           </form>
         </div>
