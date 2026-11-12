@@ -15,6 +15,7 @@ type ProviderConfig = {
 };
 
 const PRESETS: { id: string; label: string; type: ProviderConfig['type']; baseUrl?: string; name?: string; defaultModel: string }[] = [
+  { id: 'free', label: 'Free, no key (Pollinations)', type: 'openai-compatible', baseUrl: 'https://text.pollinations.ai/openai', name: 'pollinations', defaultModel: 'openai-fast' },
   { id: 'vercel', label: 'Vercel AI Gateway', type: 'gateway', defaultModel: 'anthropic/claude-sonnet-4.5' },
   { id: 'vercel-key', label: 'Vercel AI Gateway (your key)', type: 'openai-compatible', baseUrl: 'https://ai-gateway.vercel.sh/v1', name: 'vercel', defaultModel: 'anthropic/claude-sonnet-4.5' },
   { id: 'openrouter', label: 'OpenRouter', type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1', name: 'openrouter', defaultModel: 'openai/gpt-4o-mini' },
@@ -51,10 +52,10 @@ const NAV: { id: View; label: string; icon: string }[] = [
 export default function Home() {
   const [cfg, setCfg] = useState<ProviderConfig | null>(null);
   const [setupOpen, setSetupOpen] = useState(false);
-  const [presetId, setPresetId] = useState('vercel');
+  const [presetId, setPresetId] = useState('free');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('anthropic/claude-sonnet-4.5');
+  const [model, setModel] = useState('openai-fast');
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState('');

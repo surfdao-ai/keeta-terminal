@@ -98,7 +98,7 @@ export async function POST(req: Request) {
     return new Response(
       JSON.stringify({
         error:
-          'No model configured. Open "Model setup" and pick a provider — Ollama Cloud, Kilo Gateway, OpenRouter, Groq or Together all work without a Vercel credit card.',
+          'No model configured. Open "Model setup" and pick a provider. "Free, no key" works immediately with no account and no credit card; Ollama Cloud, Kilo Gateway, OpenRouter, Groq and Together also work without one.',
       }),
       { status: 400, headers: { 'content-type': 'application/json' } },
     );

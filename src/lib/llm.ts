@@ -11,6 +11,7 @@ export interface ProviderConfig {
 }
 
 const PRESETS: Record<string, { baseUrl: string; name: string }> = {
+  pollinations: { baseUrl: 'https://text.pollinations.ai/openai', name: 'pollinations' },
   openrouter: { baseUrl: 'https://openrouter.ai/api/v1', name: 'openrouter' },
   ollama: { baseUrl: 'http://localhost:11434/v1', name: 'ollama' },
   'ollama-cloud': { baseUrl: 'https://ollama.com/v1', name: 'ollama-cloud' },
