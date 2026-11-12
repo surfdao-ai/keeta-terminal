@@ -2,7 +2,7 @@
 # End-to-end smoke test of the deployed terminal.
 # Usage: bash scripts/smoke.sh [base-url]
 set -uo pipefail
-BASE="${1:-https://my-test-app-omega-nine.vercel.app}"
+BASE="${1:-https://kterminal.vercel.app}"
 JAR="$(mktemp -d)/cookies.txt"
 # Passphrase of the wallet in the store. Set SMOKE_PASS for a different one.
 PASS="${SMOKE_PASS:-skills-verify-passphrase-01}"
