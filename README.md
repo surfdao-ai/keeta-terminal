@@ -111,6 +111,22 @@ How the device holds it (`src/lib/vault.ts`):
 | **passkey** | WebAuthn PRF — derived inside the authenticator from a non-exportable, device-bound credential | Face ID / Touch ID tap |
 | **passphrase** | PBKDF2-SHA256 (310k iterations) over a passphrase you choose | type the passphrase |
 
+The passkey path needs the browser to support the WebAuthn **PRF** extension.
+Chrome and Edge expose `PublicKeyCredential.getClientCapabilities()`, so the app
+knows up front and offers the passkey first. Safari does not expose that API —
+and on iOS the PRF output is not always available — so the app defaults to the
+**passphrase** there and only switches to a passkey if the device can actually
+derive a key. If a passkey attempt fails, the vault falls back to the
+passphrase instead of erroring out.
+
+Without PRF a passkey can only *authenticate*, never derive a key, so it cannot
+protect a locally stored seed any better than a passphrase can. The passkey is a
+convenience win (no typing); the passphrase is the security boundary on devices
+without PRF. In both cases the written-down seed is the recovery copy.
+
+`npm run test:vault` exercises the vault: seal, store, open, and the failure
+modes (wrong passphrase, tampered ciphertext, short passphrase).
+
 **Create:** the browser generates the seed with the Keeta client (its browser
 build), shows it once so you can write it down, then seals it into the vault.
 Only the public address is registered with the server.
