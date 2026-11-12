@@ -5,7 +5,7 @@ An AI chat trading terminal for the Keeta Network — a bnkr.bot-style agent, bu
 ## Features
 
 - Streaming AI chat (any provider) with Keeta-specific tools
-- Non-custodial wallet: passphrase-encrypted seed, AES-256-GCM, stored server-side
+- Non-custodial wallet: the seed is held by the device (passkey or passphrase sealed), the server stores only the public address
 - Atomic swaps via Keeta FX anchors (propose → confirm on every trade)
 - **Token launches** — create new native Keeta tokens from chat (no contract; supply minted to creator)
 - Hard daily spend cap enforced in code before any block is signed
@@ -85,7 +85,7 @@ browser.
 
 The key is stored only in your browser (localStorage) and sent per request — never persisted server-side. You can reopen setup anytime via the "Model setup" button.
 
-Open http://localhost:3000, create a wallet with a strong passphrase, then ask:
+Open http://localhost:3000, create or import a wallet (the seed is generated in your browser — write it down), then ask:
 
 - "what's my portfolio?"
 - "list tradable tokens"
@@ -94,18 +94,58 @@ Open http://localhost:3000, create a wallet with a strong passphrase, then ask:
 
 Confirm trades in the UI. The daily cap defaults to $100 and is enforced before signing.
 
+## Keys and the wallet
+
+**The seed never lives on the server.** The server's wallet record is the public
+address and two timestamps — nothing that could sign.
+
+```
+server (Postgres)   wallet → { address, createdAt, updatedAt }
+device (browser)    vault  → { seed sealed with a device key }
+```
+
+How the device holds it (`src/lib/vault.ts`):
+
+| Vault | Key source | Daily unlock |
+|---|---|---|
+| **passkey** | WebAuthn PRF — derived inside the authenticator from a non-exportable, device-bound credential | Face ID / Touch ID tap |
+| **passphrase** | PBKDF2-SHA256 (310k iterations) over a passphrase you choose | type the passphrase |
+
+**Create:** the browser generates the seed with the Keeta client (its browser
+build), shows it once so you can write it down, then seals it into the vault.
+Only the public address is registered with the server.
+
+**Import:** paste an existing seed — the address is derived in the browser and
+registered. Nothing secret is sent.
+
+**Daily use:** unlock with Face ID (or the passphrase). The seed travels with the
+individual requests that need a signature — over TLS, in the request body, never
+written to the database and never logged. The cookie carries no key material at
+all, so a stolen cookie is worthless and a database dump is worthless.
+
+The written-down seed is the **recovery** copy: it restores the vault on a new
+device. It is never typed in normal use.
+
+Two deliberate exceptions:
+
+- The **automation wallet** (the unattended account the cron swaps from) has to
+  stay on the server, or the schedule cannot sign at all. Its seed is sealed with
+  `AUTOMATION_KEY` and its balance is the blast radius. It is a separate,
+  deliberately funded account.
+- If a browser cannot run the Keeta client, the server generates or derives the
+  address for that one request. The seed is read in memory and never stored.
+
+The long-term target is to move signing into the browser entirely, so the seed
+never leaves the device — Keeta supports delegated permissions
+(`permissionsChanges` / certificates) for exactly that shape.
+
 ## Notes
 
 - Keeta has no smart contracts / no AMM or DEX. Liquidity comes from FX anchor providers; if no provider issues a binding quote for a pair, the terminal refuses to execute rather than fake it.
 - Mainnet by default. Start with dust amounts.
-- The unlock cookie is a passphrase sealed with a server key (AES-256-GCM), so the
-  session survives instance changes and the passphrase is never stored at rest on
-  the server. "Lock" drops the cookie in the browser — a copy taken before
-  locking stays valid until it expires (8 hours).
 - The Keeta skills come from the KeeSpecs MCP (`ks_list_skills`, `ks_read_skill`,
   plus the `ks_*` data tools). The agent reaches them as soon as a provider and
-  a wallet are configured.
-- x402 paid reads (KeeSpecs deep analytics) are not wired in v1 — only free reads are exposed to the agent.
+  a wallet are configured.- x402 paid reads (KeeSpecs deep analytics) are not wired in v1 — only free reads are exposed to the agent.
 - The Vercel AI Gateway needs a credit card on the account before it will serve
   requests (`vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card`).
   Without one, use the "Model setup" dialog: Groq's free tier is the default,
