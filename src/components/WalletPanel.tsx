@@ -275,6 +275,12 @@ export default function WalletPanel({ address, seed, onSeed, onRegistered }: Wal
       <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
         <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">Wallet address</div>
         <div className="font-mono text-sm break-all">{shownAddress || 'No wallet yet'}</div>
+        {vault && !vault.address && (
+          <div className="mt-3 text-xs text-amber-400">
+            This vault has no address — import your written-down seed again to register it with the
+            server.
+          </div>
+        )}
         {notRegistered && (
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-amber-400">
             <span>Sealed on this device but not registered with the server yet.</span>

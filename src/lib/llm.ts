@@ -124,16 +124,6 @@ function repairingFetch(base: ProviderFetch): ProviderFetch {
     } catch {
       /* fall back to the default headers */
     }
-    console.error(
-      '[wrap-debug] upstream headers ctor=',
-      (res.headers as { constructor?: { name?: string } })?.constructor?.name,
-      'iterable=',
-      typeof (res.headers as unknown as Record<symbol, unknown>)?.[Symbol.iterator],
-      '| new headers ctor=',
-      headers.constructor?.name,
-      '| Response ctor=',
-      Response.name,
-    );
 
     return new Response(stream, { status: res.status, statusText: res.statusText, headers });
   }) as ProviderFetch;
