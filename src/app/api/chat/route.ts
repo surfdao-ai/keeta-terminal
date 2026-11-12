@@ -7,6 +7,7 @@ import {
   toUIMessageStream,
   gateway,
   isStepCount,
+  type ToolSet,
 } from 'ai';
 import { getSession } from '@/lib/agent/session';
 import { buildTools } from '@/lib/agent/tools';
@@ -68,7 +69,7 @@ export async function POST(req: Request) {
   const session = getSession(sid);
   const passphrase = session?.passphrase ?? null;
 
-  const tools = buildTools({ passphrase }) as Record<string, unknown>;
+  const tools: ToolSet = buildTools({ passphrase }) as ToolSet;
 
   const mcpUrl = process.env.KEESPECS_MCP_URL || 'https://keespecs.xyz/mcp';
   let mcpClient: Awaited<ReturnType<typeof createMCPClient>> | null = null;
@@ -76,7 +77,7 @@ export async function POST(req: Request) {
     mcpClient = await createMCPClient({ transport: { type: 'http', url: mcpUrl } });
     const mcpTools = await mcpClient.tools();
     for (const [name, t] of Object.entries(mcpTools)) {
-      if (ALLOWED_MCP_TOOLS.has(name)) tools[`ks_${name}`] = t;
+      if (ALLOWED_MCP_TOOLS.has(name)) (tools as Record<string, unknown>)[`ks_${name}`] = t;
     }
   } catch (e) {
     console.error('KeeSpecs MCP unavailable:', e instanceof Error ? e.message : e);
@@ -86,7 +87,7 @@ export async function POST(req: Request) {
     model: gateway(process.env.AI_MODEL || 'anthropic/claude-sonnet-4.5'),
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(body.messages),
-    tools: tools as never,
+    tools,
     stopWhen: isStepCount(8),
     onEnd: async () => {
       try {
