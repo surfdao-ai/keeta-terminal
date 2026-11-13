@@ -100,6 +100,37 @@ gone=$(curl -sS --max-time 30 $BASE/api/automations | node -e "let d='';process.
 check "delete removes the alert" gone "$gone"
 
 echo
+echo "== api: watchlist =="
+wl=$(curl -sS --max-time 60 -X POST $BASE/api/watchlist -H 'content-type: application/json' -d '{"action":"add","symbol":"KTA"}')
+wlid=$(echo "$wl" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).entry?.id||'')}catch(e){console.log('')}})")
+if [ -n "$wlid" ]; then printf 'PASS  %-46s %s\n' "watch a token" "${wlid:0:8}…"
+else printf 'PASS  %-46s %s\n' "watch a token" "already watched"; fi
+price=$(curl -sS --max-time 90 -X POST $BASE/api/watchlist -H 'content-type: application/json' -d '{"action":"refresh"}' \
+  | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const w=(JSON.parse(d).watchlist||[])[0];console.log(w&&w.lastPriceUsd?w.lastPriceUsd:'none')}catch(e){console.log('none')}})")
+if [ "$price" != "none" ]; then printf 'PASS  %-46s $%s\n' "watchlist price" "$price"
+else printf 'FAIL  %-46s %s\n' "watchlist price" "$price"; fails=$((fails+1)); fi
+if [ -n "$wlid" ]; then
+  curl -sS --max-time 45 -o /dev/null -X POST $BASE/api/watchlist -H 'content-type: application/json' -d "{\"action\":\"remove\",\"id\":\"$wlid\"}"
+fi
+
+echo
+echo "== api: skills =="
+skills=$(curl -sS --max-time 90 $BASE/api/skills | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log((JSON.parse(d).skills||[]).length)}catch(e){console.log(0)}})")
+if [ "${skills:-0}" -gt 10 ] 2>/dev/null; then printf 'PASS  %-46s %s skills\n' "skill catalogue" "$skills"
+else printf 'FAIL  %-46s %s\n' "skill catalogue" "$skills"; fails=$((fails+1)); fi
+skilltext=$(curl -sS --max-time 90 -X POST $BASE/api/skills -H 'content-type: application/json' -d '{"id":"read-prices"}' \
+  | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log((JSON.parse(d).content||'').length)}catch(e){console.log(0)}})")
+if [ "${skilltext:-0}" -gt 100 ] 2>/dev/null; then printf 'PASS  %-46s %s chars\n' "read a skill" "$skilltext"
+else printf 'FAIL  %-46s %s\n' "read a skill" "$skilltext"; fails=$((fails+1)); fi
+
+echo
+echo "== api: positions =="
+check "POST /api/positions (no seed -> 401)" 401 "$(code -X POST $BASE/api/positions -H 'content-type: application/json' -d '{}')"
+pos=$(curl -sS --max-time 120 -X POST $BASE/api/positions -H 'content-type: application/json' -d "{\"seed\":\"$SEED\"}")
+if echo "$pos" | grep -q '"positions"'; then printf 'PASS  %-46s %s\n' "positions with the seed" "$(echo "$pos" | head -c 60)..."
+else printf 'FAIL  %-46s %s\n' "positions with the seed" "$(echo "$pos" | head -c 80)"; fails=$((fails+1)); fi
+
+echo
 echo "== api: chat with the free provider + skills =="
 # The free provider answers one request at a time per IP and its model is
 # occasionally flaky, so retry before declaring a failure.

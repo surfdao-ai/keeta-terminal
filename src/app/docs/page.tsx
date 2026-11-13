@@ -64,6 +64,56 @@ recovery copy         the seed you wrote down — restores a vault on a new devi
     ),
   },
   {
+    id: 'watchlist',
+    title: 'watchlist',
+    body: (
+      <>
+        <p>
+          Tokens you keep an eye on, with a live price and the 24-hour change. Prices come from the
+          free Keeta reads and refresh every 15 minutes (or on demand).
+        </p>
+        <pre>{`Automations -> watchlist    add a ticker or a token address
+[refresh prices]             re-read them now
+[alert] on a row              pre-fills an alert for that token`}</pre>
+        <p className="text-zinc-600">
+          A watch entry is only a price. The alert on it is a separate automation that fires when the
+          price crosses your threshold.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: 'positions',
+    title: 'positions & pnl',
+    body: (
+      <>
+        <p>
+          What you hold, what it is worth, and the PnL against what you paid. Cost basis is tracked
+          from your own trade history with a weighted average per token.
+        </p>
+        <pre>{`Wallet -> positions      value · cost basis · unrealised · realised
+                           tokens funded from another wallet have no cost basis here`}</pre>
+      </>
+    ),
+  },
+  {
+    id: 'skills',
+    title: 'keeta skills',
+    body: (
+      <>
+        <p>
+          The Skills view lists all 31 Keeta skills — short instruction sheets for every read the
+          network exposes. Read one inline, or ask the agent for it.
+        </p>
+        <pre>{`read-status      the ledger, settlement tail, price sources
+read-prices      the KTA price on Base vs Keeta's own anchor
+read-joins       Desk / Network / Convert Check
+read-anchors     anchor movement
+read-permissions who may act on an account`}</pre>
+      </>
+    ),
+  },
+  {
     id: 'automations',
     title: 'automations',
     body: (
