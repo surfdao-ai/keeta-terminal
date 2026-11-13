@@ -80,7 +80,10 @@ export async function refreshWatchlist(): Promise<WatchEntry[]> {
   const priced = await Promise.all(
     list.map(async (w) => {
       try {
-        const price = await getTokenPrice(w.address ?? w.symbol);
+        // The ticker first: KeeSpecs has a dedicated price read for KTA that
+        // also reports the 24h change; the address is the fallback.
+        const price =
+          (await getTokenPrice(w.symbol)) ?? (await getTokenPrice(w.address ?? w.symbol));
         if (!price) return w;
         return {
           ...w,
