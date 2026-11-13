@@ -16,6 +16,7 @@ const PRETTY: Record<string, string> = {
   get_token_info: 'token',
   get_estimate: 'estimate',
   get_binding_quote: 'quote',
+  check_liquidity: 'liquidity',
   propose_trade: 'propose',
   propose_token_launch: 'launch token',
   get_trade_history: 'history',
@@ -43,14 +44,57 @@ function Rows({ data, prefix = '' }: { data: Record<string, unknown>; prefix?: s
   );
 }
 
+/**
+ * One line describing a tool result. Tool output is for the agent — the
+ * terminal only shows a summary, with the raw payload behind a toggle.
+ */
+function summarize(output: unknown): string {
+  if (output === null || output === undefined) return '';
+  if (typeof output === 'string') return output.slice(0, 120);
+  if (Array.isArray(output)) return `${output.length} rows`;
+
+  const o = output as Record<string, unknown>;
+
+  // MCP tools return { resultType, content: [{ type: 'text', text }] }
+  const content = o.content;
+  if (Array.isArray(content) && content.length) {
+    const first = content[0] as { text?: string };
+    const text = String(first?.text ?? '').replace(/\s+/g, ' ').trim();
+    return text.length > 140 ? `${text.slice(0, 140)}…` : text;
+  }
+
+  if (typeof o.error === 'string') return o.error;
+
+  if (Array.isArray(o.lines)) return `${o.lines.length} rows`;
+  if (typeof o.count === 'number') {
+    const scope = typeof o.scope === 'string' ? o.scope : '';
+    return scope ? `${o.count} ${scope}` : `${o.count} items`;
+  }
+  if (typeof o.tradable === 'boolean') {
+    return o.tradable ? 'tradable now' : 'no binding liquidity';
+  }
+  if (typeof o.address === 'string') return o.address;
+  if (typeof o.status === 'string') return o.status;
+
+  const keys = Object.keys(o).filter((k) => o[k] !== null && o[k] !== undefined);
+  if (!keys.length) return 'ok';
+  if (keys.length === 1) {
+    const v = o[keys[0]];
+    const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    return s.length > 120 ? `${s.slice(0, 120)}…` : s;
+  }
+  return keys.slice(0, 4).join(' · ');
+}
+
 export default function ToolCard({ name, state, input, output, onConfirm }: ToolCardProps) {
   const [confirmResult, setConfirmResult] = useState<unknown>(null);
   const [confirming, setConfirming] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
 
   const running = state !== 'output-available';
   const out = output as { tradeId?: string; tokenLaunchId?: string } | null;
   const actionId = out?.tradeId || out?.tokenLaunchId;
-  const label = PRETTY[name] || name;
+  const label = PRETTY[name] || name.replace(/^ks_/, '');
 
   async function handleConfirm() {
     if (!actionId) return;
@@ -62,6 +106,7 @@ export default function ToolCard({ name, state, input, output, onConfirm }: Tool
   }
 
   const isError = output && typeof output === 'object' && 'error' in (output as object);
+  const summary = running ? '' : summarize(output);
 
   return (
     <div className="my-1">
@@ -81,13 +126,22 @@ export default function ToolCard({ name, state, input, output, onConfirm }: Tool
         </span>
       </div>
 
-      {/* result */}
-      {output !== undefined && output !== null && !running && (
+      {/* result — one line, raw payload behind a toggle */}
+      {summary && (
         <div className="ml-4 pl-3 border-l border-zinc-800 text-zinc-400">
-          {typeof output === 'object' && !Array.isArray(output) ? (
-            <Rows data={output as Record<string, unknown>} />
-          ) : (
-            <pre className="whitespace-pre-wrap break-all text-zinc-300">{JSON.stringify(output, null, 2)}</pre>
+          <div className="flex items-start gap-2">
+            <span className="break-words">{summary}</span>
+            <button
+              onClick={() => setShowRaw((v) => !v)}
+              className="ml-auto shrink-0 text-[10px] text-zinc-600 hover:text-zinc-400"
+            >
+              {showRaw ? 'hide' : 'raw'}
+            </button>
+          </div>
+          {showRaw && (
+            <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[11px] text-zinc-500">
+              {JSON.stringify(output, null, 1)}
+            </pre>
           )}
         </div>
       )}

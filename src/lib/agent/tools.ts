@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import * as KeetaNet from '@keetanetwork/keetanet-client';
-import { networkAlias, userClient, loadFXClient, fromDisplay, getTokenInfo, readBalances, summarizeQuote, normalizeToken } from '../keeta/network';
+import { networkAlias, userClient, loadFXClient, toDisplay, fromDisplay, getTokenInfo, readBalances, summarizeQuote, normalizeToken } from '../keeta/network';
 import { accountFromSeed } from '../keeta/wallet';
 import { newPendingTrade, savePending, listTrades, capSpent, dailyCapUsd } from './safety';
 import { validateTokenSpec } from '../keeta/tokens';
@@ -121,6 +121,61 @@ export function buildTools(ctx: ToolContext) {
           }),
           fromDecimals: fromInfo.decimals,
           toDecimals: toInfo.decimals,
+        };
+      },
+    }),
+
+    check_liquidity: tool({
+      description:
+        'Check whether a pair can actually be traded right now. Returns the binding quote (if a provider is quoting), the estimate, and the cross-chain route via the Base anchor. Use this before proposing a trade.',
+      inputSchema: z.object({
+        from: z.string().describe('Source token address or currency code'),
+        to: z.string().describe('Destination token address or currency code'),
+        amount: z.string().describe('Amount in display units'),
+        affinity: z.enum(['from', 'to']).default('from').describe("'from' = amount is what you have; 'to' = amount is what you want"),
+      }),
+      execute: async ({ from, to, amount, affinity }) => {
+        const f = normalizeToken(from);
+        const t = normalizeToken(to);
+        const fromInfo = await getTokenInfo(f).catch(() => ({ decimals: null }));
+        const toInfo = await getTokenInfo(t).catch(() => ({ decimals: null }));
+        const rawAmount = fromDisplay(amount, fromInfo.decimals);
+
+        const acct = KeetaNet.lib.Account.fromSeed(KeetaNet.lib.Account.generateRandomSeed({ asString: true }), 0);
+        await using client = userClient(acct);
+        const fx = await loadFXClient(client);
+
+        const quotes = await fx.getQuotes({ from: f, to: t, amount: rawAmount, affinity } as unknown as Parameters<typeof fx.getQuotes>[0]);
+        const estimates = await fx.getEstimates({ from: f, to: t, amount: rawAmount, affinity } as unknown as Parameters<typeof fx.getEstimates>[0]);
+
+        const binding = quotes?.[0];
+        const estimate = estimates?.[0];
+        const tradable = Boolean(binding);
+
+        return {
+          tradable,
+          pair: `${f} -> ${t}`,
+          amount,
+          bindingQuote: binding
+            ? {
+                provider: String((binding as { provider?: { providerID?: unknown } })?.provider?.providerID ?? 'unknown'),
+                convertedAmount: binding.quote?.convertedAmount?.toString() ?? null,
+                display: toDisplay(binding.quote?.convertedAmount ?? 0n, toInfo.decimals),
+              }
+            : null,
+          estimate: estimate
+            ? {
+                provider: String((estimate as { provider?: { providerID?: unknown } })?.provider?.providerID ?? 'unknown'),
+                convertedAmount: estimate.estimate?.convertedAmount?.toString() ?? null,
+                display: toDisplay(estimate.estimate?.convertedAmount ?? 0n, toInfo.decimals),
+                canPerformExchange: estimate.estimate?.canPerformExchange ?? null,
+              }
+            : null,
+          // Keeta-native liquidity is thin; the practical route is usually the
+          // Base anchor (bridge the asset on Base, then swap on Keeta).
+          note: tradable
+            ? 'A provider is quoting this pair — a trade can be proposed.'
+            : 'No provider is issuing a binding quote for this pair right now. Keeta-native liquidity is thin; the practical route is to hold the asset on Base (the Base anchor, e.g. USDC on Base) and bridge it in. Do not propose a trade that cannot fill.',
         };
       },
     }),

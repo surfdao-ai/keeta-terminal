@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
+import Link from 'next/link';
 import type { UIMessage } from 'ai';
 import PwaRegister, { type BeforeInstallPromptEvent } from '@/components/PwaRegister';
 import ViewportLock from '@/components/ViewportLock';
@@ -525,7 +526,7 @@ export default function Home() {
                   install app
                 </button>
               )}
-              <a href="https://docs.keeta.com" target="_blank" rel="noreferrer" className="block hover:text-zinc-300">docs</a>
+              <Link href="/docs" className="block hover:text-zinc-300">docs</Link>
               <a href="https://github.com/surfdao-ai/keeta-terminal" target="_blank" rel="noreferrer" className="block hover:text-zinc-300">github</a>
               <div className="pt-1 text-zinc-700">v1.0.0 · keeta mainnet</div>
             </>

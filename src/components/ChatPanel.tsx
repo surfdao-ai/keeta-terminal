@@ -124,15 +124,6 @@ export default function ChatPanel({
         ) : (
           <div className="max-w-4xl mx-auto px-3 sm:px-5 py-4 sm:py-6">
             <div className="bg-[#0d0d10] border border-zinc-800 rounded-lg overflow-hidden shadow-[0_0_60px_-20px_rgba(76,29,149,0.5)]">
-              <div className="flex items-center gap-2 px-4 py-2 bg-[#141416] border-b border-zinc-800">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
-                <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
-                <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
-                <span className="ml-3 font-mono text-[11px] text-zinc-500">kterminal — keeta:agent</span>
-                <span className="ml-auto font-mono text-[11px] text-zinc-600">
-                  {cap ? `cap ${cap.spentUsd.toFixed(2)}/${cap.capUsd}` : 'cap 0.00/100'}
-                </span>
-              </div>
               <div className="p-4 font-mono text-[13px] leading-relaxed">
                 {messages.map((m) => (
                   <div key={m.id} className="mb-3">
@@ -248,6 +239,7 @@ export default function ChatPanel({
           <p className="font-mono text-[10px] text-zinc-700 mt-2 text-center">
             {unlocked ? `wallet ${address?.slice(0, 12)}… unlocked` : 'wallet locked — unlock in sidebar to trade'}
             {modelLabel ? ` · ${modelLabel}` : ' · no model configured'}
+            {cap ? ` · cap ${cap.spentUsd.toFixed(2)}/${cap.capUsd}` : ''}
           </p>
         </div>
       </div>
