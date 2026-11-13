@@ -264,6 +264,25 @@ node scripts/generate-icons.mjs
   so opening the keyboard no longer resizes or scrolls the app. The keyboard's height is
   published as `--kb` by `<ViewportLock />` and the composer is lifted above it.
 
+## Deploying
+
+The project is linked to this repository, so a push is a release:
+
+```
+git push origin main        -> a production deployment -> https://kterminal.vercel.app
+```
+
+`main` is the production branch. Every push to it builds and replaces the
+production deployment; a pull request gets a preview URL instead. The
+environment variables (`DATABASE_URL`, `SESSION_SECRET`, `CRON_SECRET`,
+`DAILY_SPEND_CAP_USD`) live in the Vercel project, not in the repository.
+
+To deploy by hand instead:
+
+```bash
+vercel --prod
+```
+
 ## Stack
 
 Next.js 16 (App Router) · AI SDK 7 · Vercel AI Gateway / any OpenAI-compatible provider · @keetanetwork/keetanet-client · @keetanetwork/anchor · KeeSpecs MCP · Postgres (optional)
