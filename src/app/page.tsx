@@ -9,6 +9,7 @@ import Automations from '@/components/Automations';
 import ChatPanel from '@/components/ChatPanel';
 import WalletPanel from '@/components/WalletPanel';
 import SkillsBrowser from '@/components/SkillsBrowser';
+import Positions from '@/components/Positions';
 import { readVault } from '@/lib/vault';
 
 type ProviderConfig = {
@@ -566,6 +567,12 @@ export default function Home() {
                 void refresh();
               }}
             />
+            {unlock.unlocked && (
+              <div className="mt-4">
+                <Positions seed={seed} />
+              </div>
+            )}
+
             {unlock.unlocked && (
               <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5 mt-4">
                 <div className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Balances</div>
