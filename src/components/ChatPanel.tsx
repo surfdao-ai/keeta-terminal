@@ -108,6 +108,11 @@ export default function ChatPanel({
               <p className="mt-2 text-center text-sm text-zinc-500">
                 Check balances, list tokens, get quotes, or propose a trade on Keeta.
               </p>
+              <p className="mt-1 text-center font-mono text-[11px] text-zinc-600">
+                <a href="/docs" className="hover:text-zinc-400">
+                  docs — every command, and how the keys work →
+                </a>
+              </p>
               <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {['portfolio', 'list tokens', 'estimate 1 KTA to USDC', 'propose 0.1 KTA for USDC'].map((q) => (
                   <button
