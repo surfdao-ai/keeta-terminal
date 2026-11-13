@@ -7,6 +7,7 @@ import ViewportLock from '@/components/ViewportLock';
 import Automations from '@/components/Automations';
 import ChatPanel from '@/components/ChatPanel';
 import WalletPanel from '@/components/WalletPanel';
+import { readVault } from '@/lib/vault';
 
 type ProviderConfig = {
   type: 'gateway' | 'openai-compatible';
@@ -203,6 +204,31 @@ export default function Home() {
       return [chat, ...rest].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     });
   }
+
+  // A wallet sealed on this device must be known to the server. If a
+  // registration was lost, re-send it on load.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const rec = readVault();
+      if (!rec?.address) return;
+      try {
+        const r = await fetch('/api/wallet', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'register', address: rec.address }),
+        });
+        if (!r.ok || cancelled) return;
+        const j = await r.json();
+        setUnlock((u) => ({ ...u, address: j.wallet?.address ?? rec.address, hasWallet: true }));
+      } catch {
+        /* the wallet view offers a retry */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

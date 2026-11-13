@@ -20,12 +20,14 @@ const KEY = 'chats';
 const MAX_CHATS = 100;
 
 export async function listChats(): Promise<SavedChat[]> {
-  const chats = (await dbRead<SavedChat[]>(KEY)) ?? [];
+  const raw = await dbRead<SavedChat[]>(KEY);
+  const chats = Array.isArray(raw) ? raw : [];
   return chats.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function getChat(id: string): Promise<SavedChat | null> {
-  const chats = (await dbRead<SavedChat[]>(KEY)) ?? [];
+  const raw = await dbRead<SavedChat[]>(KEY);
+  const chats = Array.isArray(raw) ? raw : [];
   return chats.find((c) => c.id === id) ?? null;
 }
 
@@ -33,7 +35,7 @@ export async function saveChat(chat: SavedChat): Promise<SavedChat> {
   const record: SavedChat = { ...chat, updatedAt: new Date().toISOString() };
   // Compare-and-set: a concurrent save of a different chat is not lost.
   await dbUpdate<SavedChat[]>(KEY, (current) => {
-    const chats = current ?? [];
+    const chats = Array.isArray(current) ? current : [];
     const idx = chats.findIndex((c) => c.id === record.id);
     if (idx >= 0) chats[idx] = record;
     else chats.unshift(record);
@@ -43,7 +45,9 @@ export async function saveChat(chat: SavedChat): Promise<SavedChat> {
 }
 
 export async function deleteChat(id: string): Promise<void> {
-  await dbUpdate<SavedChat[]>(KEY, (current) => (current ?? []).filter((c) => c.id !== id));
+  await dbUpdate<SavedChat[]>(KEY, (current) =>
+    (Array.isArray(current) ? current : []).filter((c) => c.id !== id),
+  );
 }
 
 /** Derive a short title from the first user message. */

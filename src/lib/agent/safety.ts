@@ -35,7 +35,8 @@ export function isExpired(t: PendingTrade): boolean {
 }
 
 export async function loadPending(id: string): Promise<PendingTrade | null> {
-  const all = (await dbRead<PendingTrade[]>('pendingTrades')) ?? [];
+  const raw = await dbRead<PendingTrade[]>('pendingTrades');
+  const all = Array.isArray(raw) ? raw : [];
   return all.find((t) => t.id === id) ?? null;
 }
 
@@ -79,7 +80,8 @@ export async function appendTrade(r: TradeRecord): Promise<void> {
 }
 
 export async function listTrades(limit = 50): Promise<TradeRecord[]> {
-  const all = (await dbRead<TradeRecord[]>('trades')) ?? [];
+  const raw = await dbRead<TradeRecord[]>('trades');
+  const all = Array.isArray(raw) ? raw : [];
   return all.slice(0, limit);
 }
 

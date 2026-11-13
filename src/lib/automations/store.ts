@@ -62,7 +62,9 @@ const KEY = 'automations';
 const LOG_KEY = 'automationLog';
 
 export async function listAutomations(): Promise<Automation[]> {
-  return (await dbRead<Automation[]>(KEY)) ?? [];
+  const raw = await dbRead<Automation[]>(KEY);
+  // A malformed record must not take the runner down.
+  return Array.isArray(raw) ? raw : [];
 }
 
 export async function upsertAutomation(a: Automation): Promise<Automation> {
@@ -129,7 +131,8 @@ export async function patchAutomation(
 }
 
 export async function listLog(limit = 50): Promise<AutomationLogEntry[]> {
-  return ((await dbRead<AutomationLogEntry[]>(LOG_KEY)) ?? []).slice(0, limit);
+  const raw = await dbRead<AutomationLogEntry[]>(LOG_KEY);
+  return (Array.isArray(raw) ? raw : []).slice(0, limit);
 }
 
 export function nextRunAt(everyMinutes: number, from = Date.now()): string {
