@@ -70,26 +70,35 @@ npm run dev
 
 ## Tests
 
-Two acceptance scripts drive the app over HTTP the way a browser would — they
-sign in with a wallet key they keep to themselves and never put a seed on the
-wire:
+Five scripts drive the app the way a browser would — they sign in with a
+wallet key they keep to themselves and never put a seed on the wire:
 
 ```bash
 npm run build && npx next start -p 3111
-BASE=http://localhost:3111 node scripts/security-test.mjs
-BASE=http://localhost:3111 node scripts/trade-test.mjs
+BASE=http://localhost:3111 npm run test:security
+BASE=http://localhost:3111 npm run test:trade
+BASE=http://localhost:3111 npm run test:wallet
+BASE=http://localhost:3111 npm run test:screen
+npm run test:vault
 ```
 
-`security-test.mjs` checks that every protected route answers 401 without a
+`test:security` checks that every protected route answers 401 without a
 session, that two wallets each see only their own state, that a POST without
 the CSRF token is refused, and that a body carrying a seed is ignored and never
 stored.
 
-`trade-test.mjs` walks the whole trade: the agent proposes it, the server
+`test:trade` walks the whole trade: the agent proposes it, the server
 prepares a binding quote (without a key), the browser signs the swap block, and
 the server forwards only the signed block to the FX provider.
 
-`npm run test:vault` exercises the vault on its own: seal, store, open, and the
+`test:wallet` walks the wallet flow — create, import, unlock, sign in — against
+the real server, with the browser bits (localStorage, cookies) simulated.
+
+`test:screen` renders the sign-in screen in a DOM and clicks through it: create
+a wallet, write the seed down, sign in, come back later and unlock, and try the
+wrong passphrase. It is the test that catches a broken step in the flow.
+
+`test:vault` exercises the vault on its own: seal, store, open, and the
 failure modes (wrong passphrase, tampered ciphertext, short passphrase).
 
 ## Model setup (any provider)

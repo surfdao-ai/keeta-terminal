@@ -8,6 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "test:vault": "node --experimental-strip-types scripts/vault-test.mjs",
+    "test:security": "node scripts/security-test.mjs",
+    "test:trade": "node scripts/trade-test.mjs",
+    "test:wallet": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/wallet-flow-test.mjs",
+    "test:screen": "tsx scripts/signin-screen-test.mjs",
     "smoke": "bash scripts/smoke.sh"
   },
   "dependencies": {
@@ -32,8 +36,10 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
+    "jsdom": "^29.1.1",
     "sharp": "^0.35.5",
     "tailwindcss": "4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }
