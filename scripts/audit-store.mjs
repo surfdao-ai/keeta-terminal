@@ -12,6 +12,7 @@ if (!url) {
 }
 
 const purge = process.argv.includes('--purge');
+const purgeAll = process.argv.includes('--purge-all');
 const sql = postgres(url, { max: 1 });
 
 /** Anything that looks like key material. */
@@ -82,7 +83,12 @@ try {
     console.log('');
   }
 
-  if (purge) {
+  if (purgeAll) {
+    // Empty the store: every scoped record, every nonce, every rate-limit
+    // counter and the owners index. Only for a store with no real visitors.
+    const res = await sql`DELETE FROM kt_store`;
+    console.log(`\nemptied the store (${res.count} key(s) removed)`);
+  } else if (purge) {
     const toDelete = [...legacy.map((l) => l.key), ...seeded.map((s) => s.key)];
     const unique = [...new Set(toDelete)];
     if (!unique.length) {

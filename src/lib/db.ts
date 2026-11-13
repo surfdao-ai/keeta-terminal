@@ -54,6 +54,17 @@ interface KVBackend {
   overwrite<T>(key: string, value: T): Promise<void>;
 }
 
+/**
+ * A `null` value means "this record is gone".
+ *
+ * The Postgres table keeps its values in a `jsonb not null` column, so SQL
+ * NULL is not an option — the backends turn a null into a delete, which is
+ * what every caller means by it anyway.
+ */
+function isRemoval(value: unknown): boolean {
+  return value === null || value === undefined;
+}
+
 /* ------------------------------------------------------------------ *
  * File backend (development only)
  * ------------------------------------------------------------------ */
@@ -65,7 +76,8 @@ async function writeFileKey(key: string, value: unknown): Promise<void> {
   } catch {
     /* first write */
   }
-  parsed[key] = value;
+  if (isRemoval(value)) delete parsed[key];
+  else parsed[key] = value;
   await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.writeFile(DATA_FILE, JSON.stringify(parsed, null, 2));
 }
@@ -122,6 +134,16 @@ async function getPostgres(): Promise<PgDB> {
           return { value: (row?.value ?? null) as T | null, rev: row ? String(row.rev) : null };
         },
         async write<T>(key: string, value: T, expectedRev: string | null) {
+          if (isRemoval(value)) {
+            // Removing a record is a delete; the value column itself is NOT NULL.
+            if (expectedRev === null) {
+              await sql`DELETE FROM kt_store WHERE key = ${key}`;
+              return null;
+            }
+            const res = await sql`DELETE FROM kt_store WHERE key = ${key} AND rev = ${Number(expectedRev)}`;
+            if (res.count === 0) throw new StoreConflictError(key);
+            return null;
+          }
           if (expectedRev === null) {
             // Create only when the key is still absent.
             const res = await sql`INSERT INTO kt_store (key, value, rev) VALUES (${key}, ${sql.json(
@@ -137,6 +159,10 @@ async function getPostgres(): Promise<PgDB> {
           return String(Number(expectedRev) + 1);
         },
         async overwrite<T>(key: string, value: T) {
+          if (isRemoval(value)) {
+            await sql`DELETE FROM kt_store WHERE key = ${key}`;
+            return;
+          }
           await sql`INSERT INTO kt_store (key, value, rev) VALUES (${key}, ${sql.json(
             value as object,
           )}, 1) ON CONFLICT (key) DO UPDATE SET value = excluded.value, rev = kt_store.rev + 1, updated = now()`;
@@ -246,7 +272,16 @@ const blobDB: KVBackend = {
     }
   },
   async write<T>(key: string, value: T, expectedRev: string | null) {
-    const { put } = await import('@vercel/blob');
+    const { put, del } = await import('@vercel/blob');
+    if (isRemoval(value)) {
+      try {
+        await del(blobPath(key), { token: process.env.BLOB_READ_WRITE_TOKEN });
+      } catch (e) {
+        // Deleting a record that is already gone is the desired end state.
+        if (!isBlobNotFound(e)) throw e;
+      }
+      return null;
+    }
     try {
       const res = await put(blobPath(key), JSON.stringify(value), {
         access: 'private',
@@ -264,7 +299,15 @@ const blobDB: KVBackend = {
     }
   },
   async overwrite<T>(key: string, value: T) {
-    const { put } = await import('@vercel/blob');
+    const { put, del } = await import('@vercel/blob');
+    if (isRemoval(value)) {
+      try {
+        await del(blobPath(key), { token: process.env.BLOB_READ_WRITE_TOKEN });
+      } catch (e) {
+        if (!isBlobNotFound(e)) throw e;
+      }
+      return;
+    }
     await put(blobPath(key), JSON.stringify(value), {
       access: 'private',
       contentType: 'application/json',
@@ -427,10 +470,10 @@ export async function dbUpdate<T>(
     // several instances). Merge onto the freshest value and force the write:
     // the merge still applies our change to whatever is stored now, so the
     // common case keeps every writer's data.
-    const { value } = await db.read<T>(key);
+    const { value } = await db.read<T>(storageKey);
     const next = await mutate(value);
-    console.error(`[kv] "${key}" fell back to a forced write after ${attempts} conflicting attempts`);
-    await db.overwrite(key, next);
+    console.error(`[kv] "${storageKey}" fell back to a forced write after ${attempts} conflicting attempts`);
+    await db.overwrite(storageKey, next);
     return next;
   });
 }
