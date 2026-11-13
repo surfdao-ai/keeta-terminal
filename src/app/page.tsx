@@ -8,6 +8,7 @@ import ViewportLock from '@/components/ViewportLock';
 import Automations from '@/components/Automations';
 import ChatPanel from '@/components/ChatPanel';
 import WalletPanel from '@/components/WalletPanel';
+import SkillsBrowser from '@/components/SkillsBrowser';
 import { readVault } from '@/lib/vault';
 
 type ProviderConfig = {
@@ -73,7 +74,7 @@ function subscribeCfg(onStoreChange: () => void): () => void {
   };
 }
 
-type View = 'chat' | 'wallet' | 'trade' | 'automations' | 'settings';
+type View = 'chat' | 'wallet' | 'trade' | 'automations' | 'skills' | 'settings';
 
 /** Small trash can used by the saved-chat list. */
 function TrashIcon({ className = 'w-3.5 h-3.5' }: { className?: string }) {
@@ -101,6 +102,7 @@ const NAV: { id: View; label: string; icon: string }[] = [
   { id: 'wallet', label: 'Wallet', icon: '👛' },
   { id: 'trade', label: 'Trade', icon: '⇄' },
   { id: 'automations', label: 'Automations', icon: '⚡' },
+  { id: 'skills', label: 'Skills', icon: '📖' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];
 
@@ -583,6 +585,8 @@ export default function Home() {
             )}
           </div>
         )}
+
+        {view === 'skills' && <SkillsBrowser />}
 
         {view === 'trade' && (
           <div className="flex-1 overflow-y-auto p-8 max-w-2xl mx-auto w-full">
