@@ -5,8 +5,11 @@ An AI chat trading terminal for the Keeta Network — a bnkr.bot-style agent, bu
 ## Features
 
 - Streaming AI chat (any provider) with Keeta-specific tools
+- **Sign-in with a wallet signature** — one-time nonce, browser-side signature, httpOnly session cookie
+- **One terminal per visitor** — every record is scoped to the signed-in address
 - Non-custodial wallet: the seed is held by the device (passkey or passphrase sealed), the server stores only the public address
-- Atomic swaps via Keeta FX anchors (propose → confirm on every trade)
+- **The seed never leaves the browser** — trades are proposed by the server, signed in the browser, and only the signed block is sent back
+- Atomic swaps via Keeta FX anchors (propose → confirm → sign in the browser on every trade)
 - **Token launches** — create new native Keeta tokens from chat (no contract; supply minted to creator)
 - Hard daily spend cap enforced in code before any block is signed
 - Read-only Keeta market data via KeeSpecs MCP (prices, providers, tokens)
@@ -21,9 +24,11 @@ An AI chat trading terminal for the Keeta Network — a bnkr.bot-style agent, bu
 
 ## Storage
 
-The terminal keeps every piece of state in one key/value store: the encrypted
-wallet seed, the trade log, the daily spend cap, the automations and the saved
-chats. Three backends, picked automatically:
+The terminal keeps every piece of state in one key/value store: the trade log,
+the daily spend cap, the automations, the saved chats and the public wallet
+address. Every key is scoped to the signed-in wallet address
+(`u:<address>:<key>`), so one visitor can never read or overwrite another's
+state. Three backends, picked automatically:
 
 | Backend | Selected when | Notes |
 |---|---|---|
@@ -63,6 +68,30 @@ npm install
 npm run dev
 ```
 
+## Tests
+
+Two acceptance scripts drive the app over HTTP the way a browser would — they
+sign in with a wallet key they keep to themselves and never put a seed on the
+wire:
+
+```bash
+npm run build && npx next start -p 3111
+BASE=http://localhost:3111 node scripts/security-test.mjs
+BASE=http://localhost:3111 node scripts/trade-test.mjs
+```
+
+`security-test.mjs` checks that every protected route answers 401 without a
+session, that two wallets each see only their own state, that a POST without
+the CSRF token is refused, and that a body carrying a seed is ignored and never
+stored.
+
+`trade-test.mjs` walks the whole trade: the agent proposes it, the server
+prepares a binding quote (without a key), the browser signs the swap block, and
+the server forwards only the signed block to the FX provider.
+
+`npm run test:vault` exercises the vault on its own: seal, store, open, and the
+failure modes (wrong passphrase, tampered ciphertext, short passphrase).
+
 ## Model setup (any provider)
 
 On first load the terminal shows a **Model setup** dialog. Pick a provider and paste your key:
@@ -85,14 +114,14 @@ browser.
 
 The key is stored only in your browser (localStorage) and sent per request — never persisted server-side. You can reopen setup anytime via the "Model setup" button.
 
-Open http://localhost:3000, create or import a wallet (the seed is generated in your browser — write it down), then ask:
+Open http://localhost:3000, create or import a wallet (the seed is generated in your browser — write it down), unlock it, and sign in. Then ask:
 
 - "what's my portfolio?"
 - "list tradable tokens"
 - "estimate 1 KTA to USDC"
 - "propose trading 0.1 KTA for USDC"
 
-Confirm trades in the UI. The daily cap defaults to $100 and is enforced before signing.
+Confirm trades in the UI — the browser signs them. The daily cap defaults to $100 and is enforced in the browser before signing and again on the server.
 
 ## Keys and the wallet
 
@@ -134,26 +163,61 @@ Only the public address is registered with the server.
 **Import:** paste an existing seed — the address is derived in the browser and
 registered. Nothing secret is sent.
 
-**Daily use:** unlock with Face ID (or the passphrase). The seed travels with the
-individual requests that need a signature — over TLS, in the request body, never
-written to the database and never logged. The cookie carries no key material at
-all, so a stolen cookie is worthless and a database dump is worthless.
+**Daily use:** unlock with Face ID (or the passphrase) and sign in. The seed is
+used **in the browser** and never travels: what leaves the browser is a
+signature, never the key. The session cookie carries no key material at all, so
+a stolen cookie is worthless and a database dump is worthless.
 
 The written-down seed is the **recovery** copy: it restores the vault on a new
 device. It is never typed in normal use.
 
-Two deliberate exceptions:
+## Sign-in
 
-- The **automation wallet** (the unattended account the cron swaps from) has to
-  stay on the server, or the schedule cannot sign at all. Its seed is sealed with
-  `AUTOMATION_KEY` and its balance is the blast radius. It is a separate,
-  deliberately funded account.
-- If a browser cannot run the Keeta client, the server generates or derives the
-  address for that one request. The seed is read in memory and never stored.
+Every visitor gets their own terminal, and the session is what proves whose it is:
 
-The long-term target is to move signing into the browser entirely, so the seed
-never leaves the device — Keeta supports delegated permissions
-(`permissionsChanges` / certificates) for exactly that shape.
+```
+1  POST /api/auth/nonce     the server issues a one-time nonce
+2  the browser signs it      with the wallet key, in the browser
+3  POST /api/auth/login      the server verifies the signature against the public key
+4  the server sets           kt_session (httpOnly, secure, SameSite=strict)
+                             kt_csrf    (readable — echoed in the x-kt-csrf header)
+```
+
+The session token is stateless and HMAC-signed (`SESSION_SECRET`, falling back
+to `AUTOMATION_KEY`), and it names the wallet address. Everything that belongs
+to a visitor — wallet address, spend cap, automations, watchlist, chats, trade
+history — is stored under that address, so two browsers with two wallets see two
+different terminals.
+
+Every `/api` route except `nonce` and `login` answers **401** without a valid
+session. Every mutating request must also echo the CSRF token (otherwise
+**403**), and each session gets its own rate limit.
+
+## Signing a trade
+
+The server never holds a key, so it cannot sign. A trade therefore travels in
+three steps:
+
+```
+1  prepare   the server asks the FX providers for a binding quote and returns
+             an intent: amount, token, recipient, fee, provider
+2  approve   the browser shows the intent and asks you to confirm it
+3  sign      the browser builds the swap block locally, signs it with your key
+             and posts back only the signed block
+```
+
+The server forwards that signed block to the provider's `createExchange`
+endpoint and records the result. It never sees a seed, a private key, or an
+unsigned transaction it could turn into a signed one.
+
+**Automations** follow the same rule. The server holds no hot key, so a due
+recurring swap can only *propose*: it queues an action that waits for you under
+Automations, where you review it and sign it in your browser. For a swap that
+should run unattended, you create a separate low-balance automation wallet in
+the browser — its seed is sealed in your vault and the server only learns its
+address, so it cannot move that money by itself. What that wallet holds is the
+blast radius: park only what you are willing to lose. The daily cap is checked
+in the browser before signing and again on the server.
 
 ## Notes
 
@@ -168,8 +232,12 @@ never leaves the device — Keeta supports delegated permissions
   and "Free, no key" needs no account at all — neither touches the Vercel gateway.
 - Automations run from the Vercel schedule every 15 minutes (`vercel.json` →
   `schedules.automations-run`). The schedule authenticates with
-  `Authorization: Bearer $CRON_SECRET`; unauthenticated callers may still
-  evaluate alerts but never sign a swap.
+  `Authorization: Bearer $CRON_SECRET`; it evaluates alerts and proposes
+  recurring swaps, but it never signs anything.
+- The server keeps one throwaway account (`src/lib/keeta/ephemeral.ts`) purely
+  because the Keeta FX client insists on a signing account when you ask it for
+  a price. It holds a random key that is unrelated to any user wallet, is never
+  sent anywhere and is never stored.
 
 ## Token launches
 
@@ -179,7 +247,7 @@ Keeta tokens are created natively on the ledger (CREATE_IDENTIFIER) with attribu
 launch a token called KTW, ticker KTW, supply 1000000, 18 decimals
 ```
 
-The agent proposes it, you confirm, and the terminal creates the token, mints the full supply to your wallet, and writes `decimalPlaces` metadata so every client renders balances correctly. Creating a token needs KTA in the wallet for network fees.
+The agent proposes it, you confirm, and the browser signs the launch block and publishes it — the server never holds the key. The full supply is minted to your wallet, and `decimalPlaces` metadata is written so every client renders balances correctly. Creating a token needs KTA in the wallet for network fees.
 
 Regenerate PWA icons after changing `public/icon.svg`:
 

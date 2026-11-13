@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import ToolCard from '@/components/ToolCard';
+import type { TradeIntent } from '@/lib/keeta/trade-types';
 
 export interface PanelProviderConfig {
   type: 'gateway' | 'openai-compatible';
@@ -17,8 +18,10 @@ interface ChatPanelProps {
   chatId: string;
   initialMessages: UIMessage[];
   providerConfig: PanelProviderConfig | null;
-  /** The wallet seed, sent with the request that needs a signature. */
-  seed: string | null;
+  /** A prepared trade waiting for the user to approve before it is signed. */
+  tradeIntent: TradeIntent | null;
+  onSignTrade: (setter: (r: unknown) => void) => void;
+  onCancelTrade: () => void;
   cap: { spentUsd: number; capUsd: number } | null;
   unlocked: boolean;
   address: string | null;
@@ -31,7 +34,9 @@ export default function ChatPanel({
   chatId,
   initialMessages,
   providerConfig,
-  seed,
+  tradeIntent,
+  onSignTrade,
+  onCancelTrade,
   cap,
   unlocked,
   address,
@@ -48,7 +53,6 @@ export default function ChatPanel({
       body: {
         messages,
         providerConfig: providerConfig ?? undefined,
-        seed: seed ?? undefined,
       },
     }),
   });
@@ -197,6 +201,39 @@ export default function ChatPanel({
                     <span className="text-red-400 whitespace-pre-wrap break-words">
                       {error.message}
                     </span>
+                  </div>
+                )}
+
+                {tradeIntent && (
+                  <div className="ml-4 mt-2 border border-purple-800/70 bg-[#120d1c] rounded-lg p-3">
+                    <div className="font-mono text-[11px] text-purple-300 uppercase tracking-wider mb-2">
+                      confirm this trade
+                    </div>
+                    <div className="font-mono text-[12px] text-zinc-300 space-y-0.5">
+                      <div>send&nbsp;&nbsp;{tradeIntent.summary.amount} {tradeIntent.summary.from}</div>
+                      <div>recv&nbsp;&nbsp;{tradeIntent.summary.receive} {tradeIntent.summary.to}</div>
+                      <div className="text-zinc-500">
+                        provider {tradeIntent.summary.provider} · fee ~${tradeIntent.summary.costUsd.toFixed(2)}
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 mt-2">
+                      It is signed in this browser and sent to the provider. Nothing is signed until
+                      you approve.
+                    </p>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => onSignTrade(() => undefined)}
+                        className="px-3 py-1 font-mono text-[12px] rounded bg-[#4C1D95] hover:bg-purple-700 text-white"
+                      >
+                        [ sign and send ]
+                      </button>
+                      <button
+                        onClick={onCancelTrade}
+                        className="px-3 py-1 font-mono text-[12px] rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+                      >
+                        [ cancel ]
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

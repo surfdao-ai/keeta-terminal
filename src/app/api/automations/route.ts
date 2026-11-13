@@ -1,52 +1,54 @@
 import { NextResponse } from 'next/server';
+import { guardRead, guardWrite, ownerOf } from '@/lib/auth/guard';
 import {
   listAutomations,
   upsertAutomation,
   patchAutomation,
   removeAutomation,
   listLog,
-  nextRunAt,
-  MIN_EVERY_MINUTES,
-  MAX_AUTOMATION_USD,
   type Automation,
 } from '@/lib/automations/store';
-import { getAutomationWallet, automationEnabled } from '@/lib/automations/wallet';
+import { getAutomationWallet } from '@/lib/automations/wallet';
 import { resolveToken } from '@/lib/automations/prices';
+import { listPending } from '@/lib/agent/safety';
 
-export async function GET() {
-  const wallet = await getAutomationWallet();
+export async function GET(req: Request) {
+  const { session, error } = await guardRead(req);
+  if (error) return error;
+  const owner = ownerOf(session);
+
+  const wallet = await getAutomationWallet(owner);
   return NextResponse.json({
-    automations: await listAutomations(),
-    log: await listLog(25),
+    automations: await listAutomations(owner),
+    pending: await listPending(owner),
+    log: await listLog(owner, 25),
     wallet: wallet ? { address: wallet.address, createdAt: wallet.createdAt } : null,
-    automationKeyConfigured: automationEnabled(),
-    minEveryMinutes: MIN_EVERY_MINUTES,
-    maxAutomationUsd: MAX_AUTOMATION_USD,
+    minEveryMinutes: 15,
+    maxAutomationUsd: 100,
   });
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as { action?: string; seed?: string; [k: string]: unknown };
-  const seed = typeof body.seed === 'string' && body.seed.trim() ? body.seed.trim() : null;
-  if (!seed) {
-    return NextResponse.json({ error: 'Wallet locked — unlock to manage automations.' }, { status: 401 });
-  }
+  const { session, error } = await guardWrite(req);
+  if (error) return error;
+  const owner = ownerOf(session);
+
+  const body = (await req.json()) as { action?: string; [k: string]: unknown };
 
   if (body.action === 'delete') {
-    await removeAutomation(String(body.id));
-    return NextResponse.json({ ok: true, automations: await listAutomations() });
+    await removeAutomation(owner, String(body.id));
+    return NextResponse.json({ ok: true, automations: await listAutomations(owner) });
   }
 
   if (body.action === 'toggle') {
-    const list = await listAutomations();
+    const list = await listAutomations(owner);
     const a = list.find((x) => x.id === body.id);
     if (!a) return NextResponse.json({ error: 'Automation not found.' }, { status: 404 });
     // Compute the target state first so a conflict retry cannot flip twice.
-    const updated = await patchAutomation(a.id, { enabled: !a.enabled });
+    const updated = await patchAutomation(owner, a.id, { enabled: !a.enabled });
     return NextResponse.json({ ok: true, automation: updated ?? a });
   }
 
-  // create
   const kind = body.kind === 'recurring' ? 'recurring' : 'alert';
   const name = String(body.name ?? '').trim() || (kind === 'alert' ? 'Price alert' : 'Recurring swap');
 
@@ -69,11 +71,11 @@ export async function POST(req: Request) {
       createdAt: new Date().toISOString(),
       triggered: false,
     };
-    await upsertAutomation(automation);
+    await upsertAutomation(owner, automation);
     return NextResponse.json({ ok: true, automation });
   }
 
-  // recurring swap
+  // Recurring swap
   const fromRef = String(body.fromToken ?? '').trim();
   const toRef = String(body.toToken ?? '').trim();
   const amount = String(body.amount ?? '').trim();
@@ -82,9 +84,9 @@ export async function POST(req: Request) {
   if (!fromRef || !toRef || !amount) {
     return NextResponse.json({ error: 'fromToken, toToken and amount are required' }, { status: 400 });
   }
-  if (!Number.isFinite(everyMinutes) || everyMinutes < MIN_EVERY_MINUTES) {
+  if (!Number.isFinite(everyMinutes) || everyMinutes < 15) {
     return NextResponse.json(
-      { error: `everyMinutes must be at least ${MIN_EVERY_MINUTES} (Vercel Hobby schedules run every 15m)` },
+      { error: 'everyMinutes must be at least 15 (Vercel Hobby schedules run every 15m)' },
       { status: 400 },
     );
   }
@@ -105,8 +107,8 @@ export async function POST(req: Request) {
     everyMinutes,
     enabled: true,
     createdAt: new Date().toISOString(),
-    nextRunAt: nextRunAt(everyMinutes),
+    nextRunAt: new Date(Date.now() + everyMinutes * 60_000).toISOString(),
   };
-  await upsertAutomation(automation);
+  await upsertAutomation(owner, automation);
   return NextResponse.json({ ok: true, automation });
 }

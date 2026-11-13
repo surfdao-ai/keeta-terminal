@@ -26,17 +26,17 @@ export interface WatchEntry {
   createdAt: string;
 }
 
-export async function listWatchlist(): Promise<WatchEntry[]> {
-  const raw = await dbRead<WatchEntry[]>(KEY);
+export async function listWatchlist(owner: string): Promise<WatchEntry[]> {
+  const raw = await dbRead<WatchEntry[]>(KEY, owner);
   return Array.isArray(raw) ? raw : [];
 }
 
 /** Add a token to the watchlist. Returns null when it is already watched. */
-export async function addWatch(symbolRaw: string): Promise<WatchEntry | null> {
+export async function addWatch(owner: string, symbolRaw: string): Promise<WatchEntry | null> {
   const symbol = symbolRaw.trim();
   if (!symbol) return null;
 
-  const list = await listWatchlist();
+  const list = await listWatchlist(owner);
   if (list.some((w) => w.symbol.toLowerCase() === symbol.toLowerCase())) return null;
 
   let address: string | undefined;
@@ -58,23 +58,29 @@ export async function addWatch(symbolRaw: string): Promise<WatchEntry | null> {
     ...(label ? { label } : {}),
     createdAt: new Date().toISOString(),
   };
-  await dbUpdate<WatchEntry[]>(KEY, (current) => {
-    const existing = Array.isArray(current) ? current : [];
-    if (existing.some((w) => w.symbol.toLowerCase() === symbol.toLowerCase())) return existing;
-    return [entry, ...existing].slice(0, 50);
-  });
+  await dbUpdate<WatchEntry[]>(
+    KEY,
+    (current) => {
+      const existing = Array.isArray(current) ? current : [];
+      if (existing.some((w) => w.symbol.toLowerCase() === symbol.toLowerCase())) return existing;
+      return [entry, ...existing].slice(0, 50);
+    },
+    { owner },
+  );
   return entry;
 }
 
-export async function removeWatch(id: string): Promise<void> {
-  await dbUpdate<WatchEntry[]>(KEY, (current) =>
-    (Array.isArray(current) ? current : []).filter((w) => w.id !== id),
+export async function removeWatch(owner: string, id: string): Promise<void> {
+  await dbUpdate<WatchEntry[]>(
+    KEY,
+    (current) => (Array.isArray(current) ? current : []).filter((w) => w.id !== id),
+    { owner },
   );
 }
 
 /** Refresh the price snapshot of every entry. */
-export async function refreshWatchlist(): Promise<WatchEntry[]> {
-  const list = await listWatchlist();
+export async function refreshWatchlist(owner: string): Promise<WatchEntry[]> {
+  const list = await listWatchlist(owner);
   if (!list.length) return [];
 
   const priced = await Promise.all(
@@ -97,12 +103,16 @@ export async function refreshWatchlist(): Promise<WatchEntry[]> {
     }),
   );
 
-  await dbUpdate<WatchEntry[]>(KEY, (current) => {
-    const live = Array.isArray(current) ? current : [];
-    // Keep the entries the user added while we were fetching prices.
-    const merged = live.map((w) => priced.find((p) => p.id === w.id) ?? w);
-    const added = priced.filter((p) => !live.some((w) => w.id === p.id));
-    return [...added, ...merged].slice(0, 50);
-  });
+  await dbUpdate<WatchEntry[]>(
+    KEY,
+    (current) => {
+      const live = Array.isArray(current) ? current : [];
+      // Keep the entries the user added while we were fetching prices.
+      const merged = live.map((w) => priced.find((p) => p.id === w.id) ?? w);
+      const added = priced.filter((p) => !live.some((w) => w.id === p.id));
+      return [...added, ...merged].slice(0, 50);
+    },
+    { owner },
+  );
   return priced;
 }

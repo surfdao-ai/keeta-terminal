@@ -1,47 +1,30 @@
 import { NextResponse } from 'next/server';
-import { readBalances } from '@/lib/keeta/network';
-import { getWallet, accountFromSeed } from '@/lib/keeta/wallet';
+import { guardRead, ownerOf } from '@/lib/auth/guard';
+import { getWallet } from '@/lib/keeta/wallet';
 import { capSpent, dailyCapUsd } from '@/lib/agent/safety';
+import { readPublicBalances } from '@/lib/keeta/public-reads';
 
 /**
- * Terminal state.
+ * The terminal's state for the signed-in visitor.
  *
- *   GET  -> public state (address, cap). No key material involved.
- *   POST -> the same plus the balances, which require the signing seed that
- *           the browser sends for this request only.
+ * The balances are read with a public, unsigned read — the server never holds
+ * a key, so it cannot sign anything on the visitor's behalf.
  */
-export async function GET() {
-  const wallet = await getWallet();
-  return NextResponse.json({
-    hasWallet: Boolean(wallet),
-    address: wallet?.address ?? null,
-    cap: { spentUsd: await capSpent(), capUsd: await dailyCapUsd() },
-  });
-}
+export async function GET(req: Request) {
+  const { session, error } = await guardRead(req);
+  if (error) return error;
 
-export async function POST(req: Request) {
-  const body = (await req.json().catch(() => ({}))) as { seed?: string };
-  const wallet = await getWallet();
-  const seed = typeof body.seed === 'string' && body.seed.trim() ? body.seed.trim() : null;
-
-  let balances: unknown[] | null = null;
-  let unlocked = false;
-
-  if (seed) {
-    try {
-      const { account } = accountFromSeed(seed);
-      balances = await readBalances(account);
-      unlocked = true;
-    } catch {
-      balances = null;
-    }
-  }
+  const owner = ownerOf(session);
+  const registered = await getWallet(owner);
+  const balances = await readPublicBalances(session.address).catch(() => null);
 
   return NextResponse.json({
-    hasWallet: Boolean(wallet),
-    address: wallet?.address ?? null,
-    unlocked,
+    // The signed-in address is the wallet.
+    hasWallet: true,
+    address: session.address,
+    registered: registered?.address ?? null,
+    unlocked: true,
     balances,
-    cap: { spentUsd: await capSpent(), capUsd: await dailyCapUsd() },
+    cap: { spentUsd: await capSpent(owner), capUsd: await dailyCapUsd(owner) },
   });
 }

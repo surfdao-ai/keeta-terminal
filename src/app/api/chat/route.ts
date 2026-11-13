@@ -10,6 +10,7 @@ import {
   type ToolSet,
 } from 'ai';
 import { buildTools } from '@/lib/agent/tools';
+import { guardWrite } from '@/lib/auth/guard';
 import { buildModel } from '@/lib/llm';
 import type { ProviderConfig } from '@/lib/llm';
 
@@ -87,18 +88,22 @@ SAFETY RULES (non-negotiable):
 3. Estimates are non-binding; binding quotes may be unavailable on mainnet. Say so plainly.
 4. Surface remaining daily budget when proposing.
 5. Keeta has no AMM/DEX — liquidity comes from FX anchor providers, and on Keeta-native pairs it is often thin. Check with check_liquidity before proposing: if there is no binding quote, say so and offer the cross-chain route (the Base anchor, e.g. USDC on Base) instead of proposing a trade that cannot fill.
-6. Never ask for or repeat the passphrase or seed.
-7. If the wallet is locked, tell the user to unlock in the sidebar.
+6. Never ask for, repeat or request a seed, passphrase or private key. The
+   visitor signed in with a wallet; you never need their key.
+7. Trades are proposals: the browser signs them after the user confirms. Say
+   "proposed" until the user confirms, and never claim a trade executed.
 8. Token launches are native to Keeta (no contract). Initial supply is minted to the creator and needs KTA for fees.`;
 
 export async function POST(req: Request) {
+  // The visitor must be signed in (they proved control of a wallet), and the
+  // request must carry the CSRF token issued with that session.
+  const { session, error } = await guardWrite(req);
+  if (error) return error;
+
   const body = (await req.json()) as {
     messages: UIMessage[];
     providerConfig?: ProviderConfig;
-    /** Wallet seed, sent by the browser for this request only. */
-    seed?: string;
   };
-  const seed = typeof body.seed === 'string' && body.seed.trim() ? body.seed.trim() : null;
 
   let model;
   try {
@@ -120,7 +125,10 @@ export async function POST(req: Request) {
     );
   }
 
-  const tools: ToolSet = buildTools({ seed }) as ToolSet;
+  const tools: ToolSet = buildTools({
+    owner: session.address.toLowerCase(),
+    address: session.address,
+  }) as ToolSet;
 
   const mcpUrl = process.env.KEESPECS_MCP_URL || 'https://keespecs.xyz/mcp';
   let mcpClient: Awaited<ReturnType<typeof createMCPClient>> | null = null;

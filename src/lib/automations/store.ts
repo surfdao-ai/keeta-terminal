@@ -39,7 +39,7 @@ export type Automation =
       createdAt: string;
       nextRunAt: string;
       lastRunAt?: string;
-      lastStatus?: 'executed' | 'submitted' | 'failed' | 'skipped';
+      lastStatus?: 'executed' | 'submitted' | 'proposed' | 'failed' | 'skipped';
       lastMessage?: string;
       /** USD value of the last swap, so a pending one can be capped on settle. */
       usdValue?: number;
@@ -54,41 +54,57 @@ export interface AutomationLogEntry {
   at: string;
   automationId: string;
   kind: Automation['kind'];
-  status: 'triggered' | 'executed' | 'submitted' | 'failed' | 'skipped';
+  status: 'triggered' | 'executed' | 'submitted' | 'proposed' | 'failed' | 'skipped';
   message: string;
 }
 
 const KEY = 'automations';
 const LOG_KEY = 'automationLog';
 
-export async function listAutomations(): Promise<Automation[]> {
-  const raw = await dbRead<Automation[]>(KEY);
+export async function listAutomations(owner: string): Promise<Automation[]> {
+  const raw = await dbRead<Automation[]>(KEY, owner);
   // A malformed record must not take the runner down.
   return Array.isArray(raw) ? raw : [];
 }
 
-export async function upsertAutomation(a: Automation): Promise<Automation> {
+export async function upsertAutomation(owner: string, a: Automation): Promise<Automation> {
   // Compare-and-set: the UI editing one automation must not drop another.
-  await dbUpdate<Automation[]>(KEY, (current) => {
-    const list = current ?? [];
-    const idx = list.findIndex((x) => x.id === a.id);
-    if (idx >= 0) list[idx] = a;
-    else list.unshift(a);
-    return list.slice(0, 100);
-  });
+  await dbUpdate<Automation[]>(
+    KEY,
+    (current) => {
+      const list = Array.isArray(current) ? current : [];
+      const idx = list.findIndex((x) => x.id === a.id);
+      if (idx >= 0) list[idx] = a;
+      else list.unshift(a);
+      return list.slice(0, 100);
+    },
+    { owner },
+  );
+  await rememberOwner(owner);
   return a;
 }
 
-export async function removeAutomation(id: string): Promise<void> {
-  await dbUpdate<Automation[]>(KEY, (current) => (current ?? []).filter((x) => x.id !== id));
+export async function removeAutomation(owner: string, id: string): Promise<void> {
+  await dbUpdate<Automation[]>(
+    KEY,
+    (current) => (Array.isArray(current) ? current : []).filter((x) => x.id !== id),
+    { owner },
+  );
 }
 
-export async function appendLog(entry: Omit<AutomationLogEntry, 'id' | 'at'>): Promise<void> {
-  await dbUpdate<AutomationLogEntry[]>(LOG_KEY, (current) => {
-    const log = current ?? [];
-    log.unshift({ ...entry, id: crypto.randomUUID(), at: new Date().toISOString() });
-    return log.slice(0, 200);
-  });
+export async function appendLog(
+  owner: string,
+  entry: Omit<AutomationLogEntry, 'id' | 'at'>,
+): Promise<void> {
+  await dbUpdate<AutomationLogEntry[]>(
+    LOG_KEY,
+    (current) => {
+      const log = Array.isArray(current) ? current : [];
+      log.unshift({ ...entry, id: crypto.randomUUID(), at: new Date().toISOString() });
+      return log.slice(0, 200);
+    },
+    { owner },
+  );
 }
 
 /**
@@ -98,16 +114,23 @@ export async function appendLog(entry: Omit<AutomationLogEntry, 'id' | 'at'>): P
  * anything the user changed meanwhile (or vice versa). Patching only the
  * fields the runner owns, compare-and-set, keeps both sides intact.
  */
-export async function patchAutomations(patches: Map<string, Partial<Automation>>): Promise<void> {
+export async function patchAutomations(
+  owner: string,
+  patches: Map<string, Partial<Automation>>,
+): Promise<void> {
   if (patches.size === 0) return;
-  await dbUpdate<Automation[]>(KEY, (current) => {
-    const live = current ?? [];
-    for (const a of live) {
-      const p = patches.get(a.id);
-      if (p) Object.assign(a, p);
-    }
-    return live;
-  });
+  await dbUpdate<Automation[]>(
+    KEY,
+    (current) => {
+      const live = Array.isArray(current) ? current : [];
+      for (const a of live) {
+        const p = patches.get(a.id);
+        if (p) Object.assign(a, p);
+      }
+      return live;
+    },
+    { owner },
+  );
 }
 
 /**
@@ -115,24 +138,50 @@ export async function patchAutomations(patches: Map<string, Partial<Automation>>
  * toggle), so a retry after a conflict cannot flip the field twice.
  */
 export async function patchAutomation(
+  owner: string,
   id: string,
   fields: Partial<Automation>,
 ): Promise<Automation | null> {
   let updated: Automation | null = null;
-  await dbUpdate<Automation[]>(KEY, (current) => {
-    const list = current ?? [];
-    const a = list.find((x) => x.id === id);
-    if (!a) return list;
-    Object.assign(a, fields);
-    updated = a;
-    return list;
-  });
+  await dbUpdate<Automation[]>(
+    KEY,
+    (current) => {
+      const list = Array.isArray(current) ? current : [];
+      const a = list.find((x) => x.id === id);
+      if (!a) return list;
+      Object.assign(a, fields);
+      updated = a;
+      return list;
+    },
+    { owner },
+  );
   return updated;
 }
 
-export async function listLog(limit = 50): Promise<AutomationLogEntry[]> {
-  const raw = await dbRead<AutomationLogEntry[]>(LOG_KEY);
+export async function listLog(owner: string, limit = 50): Promise<AutomationLogEntry[]> {
+  const raw = await dbRead<AutomationLogEntry[]>(LOG_KEY, owner);
   return (Array.isArray(raw) ? raw : []).slice(0, limit);
+}
+
+/**
+ * The addresses that have automations.
+ *
+ * The scheduler needs to know whose automations to evaluate; this index holds
+ * public addresses only — no keys, no state.
+ */
+const OWNERS_KEY = 'automationOwners';
+
+async function rememberOwner(owner: string): Promise<void> {
+  await dbUpdate<string[]>(OWNERS_KEY, (current) => {
+    const list = Array.isArray(current) ? current : [];
+    if (list.includes(owner)) return list;
+    return [owner, ...list].slice(0, 500);
+  });
+}
+
+export async function listAutomationOwners(): Promise<string[]> {
+  const raw = await dbRead<string[]>(OWNERS_KEY);
+  return Array.isArray(raw) ? raw : [];
 }
 
 export function nextRunAt(everyMinutes: number, from = Date.now()): string {
@@ -145,12 +194,12 @@ export const MIN_EVERY_MINUTES = 15;
 /** Per-automation spend ceiling (USD) — a single run may never exceed this. */
 export const MAX_AUTOMATION_USD = 100;
 
-export async function capRemainingUsd(): Promise<number> {
-  const cap = await dailyCapUsd();
-  const spent = await capSpent();
+export async function capRemainingUsd(owner: string): Promise<number> {
+  const cap = await dailyCapUsd(owner);
+  const spent = await capSpent(owner);
   return Math.max(0, cap - spent);
 }
 
-export async function recordSpend(usd: number): Promise<void> {
-  if (usd > 0) await addCapSpend(usd);
+export async function recordSpend(owner: string, usd: number): Promise<void> {
+  if (usd > 0) await addCapSpend(owner, usd);
 }

@@ -1,6 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { apiFetch } from '@/lib/client/api';
+import { generateSeedOnDevice, addressFromSeedOnDevice } from '@/lib/keeta/device';
+import { readVault, withAutomationWallet } from '@/lib/vault';
 
 interface Automation {
   id: string;
@@ -65,6 +68,15 @@ interface WatchEntry {
   createdAt: string;
 }
 
+interface PendingProposal {
+  id: string;
+  kind: string;
+  fromToken: string;
+  toToken: string;
+  amount: string;
+  expiresAt: number;
+}
+
 interface WalletInfo {
   address: string | null;
   createdAt?: string;
@@ -72,21 +84,30 @@ interface WalletInfo {
 
 interface Props {
   unlocked: boolean;
-  /** The wallet seed, sent with the requests that authorise spending. */
-  seed: string | null;
   onNotice: (msg: string) => void;
+  /** Approve and sign a proposal in the browser. */
+  onSignProposal: (tradeId: string) => Promise<void>;
+  /** A new automation wallet was created in this browser. */
+  onAutomationWallet?: (seed: string, address: string) => void;
 }
 
-export default function Automations({ unlocked, seed, onNotice }: Props) {
+export default function Automations({
+  unlocked,
+  onNotice,
+  onSignProposal,
+  onAutomationWallet,
+}: Props) {
   const [list, setList] = useState<Automation[]>([]);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [wallet, setWallet] = useState<WalletInfo>({ address: null });
-  const [keyConfigured, setKeyConfigured] = useState(false);
   const [minEvery, setMinEvery] = useState(15);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
 
   const [watch, setWatch] = useState<WatchEntry[]>([]);
+  const [pending, setPending] = useState<PendingProposal[]>([]);
+  /** The seed of the automation wallet just created — shown once to back up. */
+  const [newAutomationSeed, setNewAutomationSeed] = useState('');
   const [watchSymbol, setWatchSymbol] = useState('KTA');
   const [watchBusy, setWatchBusy] = useState(false);
 
@@ -101,13 +122,13 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
   const [everyMinutes, setEveryMinutes] = useState('60');
 
   const load = useCallback(async () => {
-    const r = await fetch('/api/automations');
+    const r = await apiFetch('/api/automations');
     if (!r.ok) return;
     const j = await r.json();
     setList(j.automations ?? []);
+    setPending(j.pending ?? []);
     setLog(j.log ?? []);
     setWallet(j.wallet ?? { address: null });
-    setKeyConfigured(Boolean(j.automationKeyConfigured));
     setMinEvery(j.minEveryMinutes ?? 15);
 
     const w = await fetch('/api/watchlist');
@@ -139,10 +160,9 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
         kind === 'alert'
           ? { kind, name, symbol, op, valueUsd: Number(valueUsd) }
           : { kind, name, fromToken, toToken, amount, everyMinutes: Number(everyMinutes) };
-      const r = await fetch('/api/automations', {
+      const r = await apiFetch('/api/automations', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...payload, seed }),
+        json: payload,
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'failed');
@@ -157,10 +177,9 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
   }
 
   async function toggle(id: string) {
-    const r = await fetch('/api/automations', {
+    const r = await apiFetch('/api/automations', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'toggle', id, seed }),
+      json: { action: 'toggle', id },
     });
     const j = await r.json();
     if (!r.ok) return onNotice(`err  ${j.error}`);
@@ -168,10 +187,9 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
   }
 
   async function remove(id: string) {
-    const r = await fetch('/api/automations', {
+    const r = await apiFetch('/api/automations', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'delete', id, seed }),
+      json: { action: 'delete', id },
     });
     const j = await r.json();
     if (!r.ok) return onNotice(`err  ${j.error}`);
@@ -181,10 +199,9 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
   async function watchAction(action: 'add' | 'remove' | 'refresh', extra: Record<string, string> = {}) {
     setWatchBusy(true);
     try {
-      const r = await fetch('/api/watchlist', {
+      const r = await apiFetch('/api/watchlist', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action, ...extra }),
+        json: { action, ...extra },
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'failed');
@@ -202,11 +219,7 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
   async function runNow() {
     setRunning(true);
     try {
-      const r = await fetch('/api/automations/run', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ seed }),
-    });
+      const r = await apiFetch('/api/automations/run', { method: 'POST' });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'failed');
       onNotice(`ok  checked ${j.checked} · triggered ${j.triggered} · executed ${j.executed} · failed ${j.failed}`);
@@ -218,20 +231,76 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
     }
   }
 
+  /**
+   * Create the low-balance automation wallet.
+   *
+   * The seed is generated in this browser and sealed into the device vault —
+   * the server only learns the address, so it can never move those funds.
+   */
+  /** Ask for the vault passphrase so we can seal/unseal the automation key. */
+  async function askPassphrase(): Promise<string | null> {
+    const passphrase = window.prompt('Vault passphrase (it seals the automation key on this device)');
+    return passphrase && passphrase.length >= 8 ? passphrase : null;
+  }
+
   async function createWallet() {
-    const r = await fetch('/api/automations/wallet', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ seed }),
-    });
-    const j = await r.json();
-    if (!r.ok) return onNotice(`err  ${j.error}`);
-    await load();
-    onNotice('ok  automation wallet created — fund it to enable swaps');
+    try {
+      const seed = await generateSeedOnDevice();
+      const address = await addressFromSeedOnDevice(seed);
+      const rec = readVault();
+      if (!rec) {
+        onNotice('err  unlock your wallet first (the automation key is sealed with it)');
+        return;
+      }
+      const passphrase = await askPassphrase();
+      if (passphrase === null) return;
+      await withAutomationWallet(rec, passphrase, seed, address);
+
+      const r = await apiFetch('/api/automations/wallet', {
+        method: 'POST',
+        json: { action: 'register', address },
+      });
+      const j = await r.json();
+      if (!r.ok) return onNotice(`err  ${j.error}`);
+      setNewAutomationSeed(seed);
+      onAutomationWallet?.(seed, address);
+      await load();
+      onNotice('ok  automation wallet created — fund it to enable swaps');
+    } catch (e) {
+      onNotice(`err  ${(e as Error).message}`);
+    }
   }
 
   return (
     <div className="space-y-4 max-w-3xl">
+      {/* proposals waiting for a signature */}
+      {pending.length > 0 && (
+        <div className="bg-[#141416] border border-purple-800/70 rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-mono text-[13px] font-semibold text-purple-300">awaiting your signature</h2>
+            <span className="font-mono text-[10px] text-zinc-600">{pending.length}</span>
+          </div>
+          <div className="space-y-2">
+            {pending.map((pr) => (
+              <div key={pr.id} className="bg-[#09090B] rounded-lg px-3 py-2">
+                <div className="font-mono text-[12px] text-zinc-200">
+                  {pr.amount} {pr.fromToken.slice(0, 10)}… → {pr.toToken.slice(0, 10)}…
+                </div>
+                <div className="text-[10px] text-zinc-600 mt-0.5">
+                  proposed by an automation · signs in your browser
+                </div>
+                <button
+                  onClick={() => onSignProposal(pr.id)}
+                  className="mt-2 px-2.5 py-1 font-mono text-[11px] rounded bg-[#4C1D95] hover:bg-purple-700 text-white"
+                >
+                  [ review and sign ]
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* watchlist */}
       <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
         <div className="flex items-center justify-between mb-3">
@@ -319,9 +388,7 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
       <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-mono text-[13px] font-semibold">automation wallet</h2>
-          <span className="font-mono text-[10px] text-zinc-600">
-            {keyConfigured ? 'key configured' : 'AUTOMATION_KEY missing'}
-          </span>
+          <span className="font-mono text-[10px] text-zinc-600">browser-held key</span>
         </div>
         {wallet.address ? (
           <div className="space-y-2">
@@ -340,16 +407,29 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
         ) : (
           <div className="flex items-center justify-between gap-3">
             <p className="text-[11px] text-zinc-600">
-              A separate account for scheduled swaps. Its seed is encrypted with the server key; your main wallet is
-              never used for unattended execution.
+              A separate account for scheduled swaps. Its seed is generated in this browser and sealed in your vault —
+              the server never holds it, so it cannot move those funds on its own.
             </p>
             <button
               onClick={createWallet}
-              disabled={!keyConfigured}
+              disabled={!unlocked}
               className="shrink-0 px-3 py-1.5 font-mono text-[12px] rounded bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-white"
             >
               create
             </button>
+          </div>
+        )}
+
+        {newAutomationSeed && (
+          <div className="mt-3 border border-amber-800/60 bg-[#1a1408] rounded-lg p-3">
+            <div className="font-mono text-[11px] text-amber-300 uppercase tracking-wider mb-1">
+              write this down
+            </div>
+            <div className="font-mono text-[11px] text-zinc-300 break-all select-all">{newAutomationSeed}</div>
+            <p className="text-[11px] text-zinc-600 mt-1">
+              It is sealed in your vault on this device. Keep a copy — without it the automation wallet cannot be
+              recovered.
+            </p>
           </div>
         )}
       </div>

@@ -8,9 +8,13 @@ import ViewportLock from '@/components/ViewportLock';
 import Automations from '@/components/Automations';
 import ChatPanel from '@/components/ChatPanel';
 import WalletPanel from '@/components/WalletPanel';
+import SignInGate from '@/components/SignInGate';
 import SkillsBrowser from '@/components/SkillsBrowser';
 import Positions from '@/components/Positions';
 import { readVault } from '@/lib/vault';
+import { apiFetch } from '@/lib/client/api';
+import { signSwapBlock } from '@/lib/keeta/browser-signer';
+import type { TradeIntent } from '@/lib/keeta/trade-types';
 
 type ProviderConfig = {
   type: 'gateway' | 'openai-compatible';
@@ -128,11 +132,19 @@ export default function Home() {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
 
   const [unlock, setUnlock] = useState({ hasWallet: false, address: null as string | null, unlocked: false });
+  /** The signed-in wallet address (null = not signed in). */
+  const [session, setSession] = useState<string | null>(null);
   /**
-   * The wallet seed lives in memory for this session only. It is sent with the
-   * requests that need a signature and is never stored on the server.
+   * The wallet seed lives in this browser and in memory only. It is never
+   * sent to the server — it is used here to sign.
    */
   const [seed, setSeed] = useState<string | null>(null);
+  /** A prepared trade waiting for the user's confirmation before signing. */
+  const [tradeIntent, setTradeIntent] = useState<TradeIntent | null>(null);
+  /** The low-balance automation wallet's key, in memory, for automation actions. */
+  const [automationSeed, setAutomationSeed] = useState<string | null>(null);
+  /** Whether we have asked the server whether a session exists. */
+  const [sessionChecked, setSessionChecked] = useState(false);
   const [state, setState] = useState<{ balances: { token: string; display: string }[]; cap: { spentUsd: number; capUsd: number } } | null>(null);
   const [capDraft, setCapDraft] = useState<string | null>(null);
   // The input follows the stored cap until the user edits it.
@@ -145,26 +157,40 @@ export default function Home() {
   const [activeMessages, setActiveMessages] = useState<UIMessage[]>([]);
 
 
+  // Are we signed in? (the cookie decides; the seed never leaves the browser)
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const r = await apiFetch('/api/auth/session');
+      if (cancelled) return;
+      setSessionChecked(true);
+      if (r.ok) {
+        const j = await r.json();
+        setSession(j.address);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const refresh = useCallback(async () => {
-    const r = await fetch('/api/state', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ seed }),
-    });
+    const r = await apiFetch('/api/state');
+    if (!r.ok) return;
     const j = await r.json();
     setUnlock({ hasWallet: j.hasWallet, address: j.address, unlocked: Boolean(j.unlocked) });
     setState(j);
-  }, [seed]);
+  }, []);
 
   async function loadChats() {
-    const r = await fetch('/api/chats');
+    const r = await apiFetch('/api/chats');
     const j = await r.json();
     setChats(j.chats ?? []);
     return j.chats ?? [];
   }
 
   async function openChat(id: string) {
-    const r = await fetch(`/api/chats?id=${encodeURIComponent(id)}`);
+    const r = await apiFetch(`/api/chats?id=${encodeURIComponent(id)}`);
     const j = await r.json();
     setActiveChatId(id);
     setActiveMessages(j.chat?.messages ?? []);
@@ -185,11 +211,7 @@ export default function Home() {
   }
 
   async function removeChat(id: string) {
-    await fetch('/api/chats', {
-      method: 'DELETE',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
+    await apiFetch('/api/chats', { method: 'DELETE', json: { id } });
     if (id === activeChatId) {
       const list = await loadChats();
       if (list.length) {
@@ -273,10 +295,9 @@ export default function Home() {
     setCapSaving(true);
     setCapMsg('');
     try {
-      const r = await fetch('/api/settings', {
+      const r = await apiFetch('/api/settings', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ dailyCapUsd: Number(capInput), seed }),
+        json: { dailyCapUsd: Number(capInput) },
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'failed');
@@ -294,11 +315,7 @@ export default function Home() {
   useEffect(() => {
     if (!unlock.unlocked) return;
     const tick = () => {
-      fetch('/api/automations/run', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ seed }),
-      }).catch(() => undefined);
+      apiFetch('/api/automations/run', { method: 'POST' }).catch(() => undefined);
     };
     const t = setInterval(tick, 60_000);
     return () => clearInterval(t);
@@ -328,10 +345,9 @@ export default function Home() {
     setModelsLoading(true);
     setModelsError('');
     try {
-      const r = await fetch('/api/models', {
+      const r = await apiFetch('/api/models', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ baseUrl: url, apiKey: key }),
+        json: { baseUrl: url, apiKey: key },
       });
       const j = await r.json();
       if (j.error) {
@@ -405,19 +421,85 @@ export default function Home() {
   }
 
 
-  async function confirmTrade(tradeId: string, setter: (r: unknown) => void) {
-    const r = await fetch('/api/confirm', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tradeId, seed }),
-    });
+  /**
+   * Step 1 of approving a trade: ask the server to prepare it. The server
+   * returns an intent (no key involved) which we show to the user.
+   */
+  async function prepareTrade(tradeId: string, setter: (r: unknown) => void) {
+    const r = await apiFetch('/api/trades/prepare', { method: 'POST', json: { tradeId } });
     const j = await r.json();
-    setter(j);
-    await refresh();
+    if (!r.ok) {
+      setter(j);
+      return;
+    }
+    setTradeIntent(j.intent as TradeIntent);
+  }
+
+  /**
+   * Step 2: the user approved it. Check the cap here in the browser, sign
+   * the block locally and post back only the signature.
+   */
+  async function signAndSubmitTrade(setter: (r: unknown) => void) {
+    if (!tradeIntent) return;
+    const intent = tradeIntent;
+    // Automation proposals are signed with the low-balance automation key
+    // when there is one; anything else uses the main wallet.
+    const signer = intent.fromAutomation ? automationSeed ?? seed : seed;
+    try {
+      if (!signer) throw new Error('The wallet is locked — unlock it to sign.');
+
+      // The browser enforces the daily cap before anything is signed.
+      const spent = state?.cap?.spentUsd ?? 0;
+      const cap = state?.cap?.capUsd ?? 0;
+      if (intent.summary.costUsd > 0 && spent + intent.summary.costUsd > cap) {
+        throw new Error(
+          `Daily cap exceeded: ${spent.toFixed(2)} + ${intent.summary.costUsd.toFixed(2)} > ${cap}`,
+        );
+      }
+
+      const signedBlock = await signSwapBlock(intent, signer);
+      const r = await apiFetch('/api/trades/submit', {
+        method: 'POST',
+        json: { tradeId: intent.tradeId, signedBlock },
+      });
+      const j = await r.json();
+      setter(j);
+      setTradeIntent(null);
+      await refresh();
+    } catch (e) {
+      setter({ error: (e as Error).message });
+    }
+  }
+
+  /** Approve an automation proposal: prepare it, then sign it in the browser. */
+  async function signAutomationProposal(tradeId: string) {
+    const r = await apiFetch('/api/trades/prepare', { method: 'POST', json: { tradeId } });
+    const j = await r.json();
+    if (!r.ok) {
+      setNotice(`err  ${j.error}`);
+      return;
+    }
+    const intent = { ...(j.intent as TradeIntent), fromAutomation: true } as TradeIntent;
+    setTradeIntent(intent);
   }
 
   const preset = PRESETS.find((x) => x.id === presetId)!;
   const cap = state?.cap;
+
+  // No session: the only way in is a wallet signature.
+  if (session === null && !sessionChecked) {
+    return (
+      <SignInGate
+        onSignedIn={(address, unlockedSeed, unlockedAutomationSeed) => {
+          setSession(address);
+          setSeed(unlockedSeed);
+          setAutomationSeed(unlockedAutomationSeed ?? null);
+          setSessionChecked(true);
+          void refresh();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="flex h-full bg-[#09090B] text-[#F7F7F7]">
@@ -545,13 +627,15 @@ export default function Home() {
             chatId={activeChatId}
             initialMessages={activeMessages}
             providerConfig={cfg}
-            seed={seed}
             cap={cap ?? null}
             unlocked={unlock.unlocked}
             address={unlock.address}
             modelLabel={cfg ? cfg.model : ''}
             onSaved={handleChatSaved}
-            onConfirm={confirmTrade}
+            onConfirm={prepareTrade}
+            tradeIntent={tradeIntent}
+            onSignTrade={signAndSubmitTrade}
+            onCancelTrade={() => setTradeIntent(null)}
           />
         )}
 
@@ -560,16 +644,16 @@ export default function Home() {
             <h1 className="text-2xl font-bold mb-6">Wallet</h1>
             <WalletPanel
               address={unlock.address}
-              seed={seed}
-              onSeed={setSeed}
-              onRegistered={(address) => {
-                setUnlock((u) => ({ ...u, address, hasWallet: true }));
-                void refresh();
+              onSignOut={async () => {
+                await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
+                setSession(null);
+                setSeed(null);
+                setSessionChecked(false);
               }}
             />
             {unlock.unlocked && (
               <div className="mt-4">
-                <Positions seed={seed} />
+                <Positions />
               </div>
             )}
 
@@ -633,7 +717,12 @@ export default function Home() {
               Scheduled swaps and price alerts. Keeta has no on-chain scheduler, so these run on a Vercel schedule
               (every 15m) and while the app is open.
             </p>
-            <Automations unlocked={unlock.unlocked} seed={seed} onNotice={(m) => setNotice(m)} />
+            <Automations
+              unlocked={unlock.unlocked}
+              onNotice={(m) => setNotice(m)}
+              onSignProposal={signAutomationProposal}
+              onAutomationWallet={(automationWalletSeed) => setAutomationSeed(automationWalletSeed)}
+            />
           </div>
         )}
 

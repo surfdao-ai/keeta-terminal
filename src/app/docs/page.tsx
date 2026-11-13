@@ -21,8 +21,10 @@ read skill <id>               one skill's instructions
 providers                     which anchors are live
 usdc price                    the current price`}</pre>
         <p className="text-zinc-600">
-          Every trade goes through a proposal you approve with <span className="text-purple-300">[ confirm ]</span>.
-          The agent never signs anything on its own.
+          Every trade goes through a proposal you approve with{' '}
+          <span className="text-purple-300">[ sign and send ]</span>. The agent never signs anything
+          on its own: the server builds the swap, your browser signs it, and only the signed block is
+          sent back.
         </p>
       </>
     ),
@@ -33,8 +35,8 @@ usdc price                    the current price`}</pre>
     body: (
       <>
         <p>
-          The seed is generated in your browser and never reaches the server. The server stores only
-          your public address.
+          The seed is generated in your browser and never reaches the server — not in a request body,
+          not in a log, not in the database. The server stores only your public address.
         </p>
         <pre>{`vault (this device)   seed sealed under a passkey (Face ID) or a passphrase
 server (Postgres)     { address, createdAt, updatedAt } — nothing else
@@ -53,12 +55,39 @@ recovery copy         the seed you wrote down — restores a vault on a new devi
             PRF, otherwise the passphrase you chose. The seed you wrote down is only for recovery.
           </li>
           <li>
-            <span className="text-zinc-400">Lock</span> — drops the seed from memory.
+            <span className="text-zinc-400">Sign out</span> — drops the session cookie and the seed from
+            memory.
           </li>
         </ul>
         <p className="text-zinc-600">
-          The server needs the key for the requests that sign (balance reads, swaps), so it travels with
-          those requests over TLS and is never written down.
+          The seed never leaves this device. What leaves it is a signature: the sign-in proof, and the
+          signed block of a trade you approved.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: 'signin',
+    title: 'sign-in',
+    body: (
+      <>
+        <p>
+          Every visitor gets their own terminal. You sign in by proving control of your wallet, and
+          everything after that — your cap, your automations, your chats, your trades — belongs to that
+          one address and to nobody else.
+        </p>
+        <pre>{`1  the server issues a one-time nonce
+2  the browser signs it with your wallet key (here, not on the server)
+3  the server verifies the signature against your public key
+4  the server sets an httpOnly, secure, SameSite=strict cookie`}</pre>
+        <p className="text-zinc-600">
+          Every <span className="text-zinc-300">/api</span> route needs that session; without one they
+          answer 401 with no data. Every mutating request also has to echo the CSRF token from the
+          cookie, and each session gets its own rate limit.
+        </p>
+        <p className="text-zinc-600">
+          Because the session names your wallet, signing in from another browser with another wallet
+          gives you a completely separate terminal — not a shared one.
         </p>
       </>
     ),
@@ -120,11 +149,18 @@ read-permissions who may act on an account`}</pre>
       <>
         <p>Two kinds, both stored server-side and evaluated every 15 minutes by a Vercel schedule.</p>
         <pre>{`alert      fires when a price crosses a threshold — read-only, never signs
-recurring  a DCA: swap X -> Y every N minutes from the automation wallet`}</pre>
+recurring  a DCA: swap X -> Y every N minutes — proposes, you approve`}</pre>
         <p>
-          The recurring one needs its own funded wallet — the terminal creates one for you under
-          Automations. That wallet is the blast radius: it holds only what you park there, and the
-          daily cap still applies.
+          The server holds no hot key, so a recurring swap can only <span className="text-zinc-300">propose</span>.
+          When it comes due it queues an action that waits for you under Automations; you review it
+          and sign it in your browser like any other trade.
+        </p>
+        <p>
+          If you want a swap to run without you there, create the separate low-balance automation
+          wallet under Automations. Its seed is generated in this browser and sealed in your vault —
+          the server only learns its address, so it can never move that money by itself. What it
+          holds is the blast radius: park only what you are willing to lose. The daily cap applies
+          to it too.
         </p>
         <p className="text-amber-300/80">
           Keeta-native liquidity is thin. A recurring swap only fills when a provider issues a{' '}
@@ -197,7 +233,8 @@ ks_get_providers    ks_get_fx_reference  ks_get_stablecoins ...`}</pre>
         </p>
         <p className="text-zinc-600">
           Saved chats live in the store, not in the browser tab, so they survive a reload — but the
-          vault (your seed) is per browser.
+          vault (your seed) is per browser. Sign in again on another device with the same seed and
+          you get the same terminal back.
         </p>
       </>
     ),
@@ -206,7 +243,9 @@ ks_get_providers    ks_get_fx_reference  ks_get_stablecoins ...`}</pre>
     id: 'trouble',
     title: 'troubleshooting',
     body: (
-      <pre>{`"wallet locked"          the seed is not in memory — unlock in the sidebar
+      <pre>{`"sign in required"       your session expired or was never created
+"CSRF check failed"      the browser could not echo the session token
+"wallet locked"          the seed is not in memory — unlock it
 "no binding quotes"     no provider is quoting that pair right now
 "wrong passphrase"      the vault passphrase, not your seed
 nothing happens         the model is not configured — open Model setup

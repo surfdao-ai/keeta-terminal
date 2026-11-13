@@ -7,8 +7,8 @@
  * funded from another wallet has no cost basis here and is marked as such
  * rather than guessed at.
  */
-import { readBalances, getTokenInfo } from './network';
-import type { KeetaAccount } from './network';
+import { getTokenInfo } from './network';
+import { readPublicBalances } from './public-reads';
 import { listTrades } from '../agent/safety';
 import { getTokenPrice } from '../automations/prices';
 
@@ -42,9 +42,9 @@ const num = (v: string | number | undefined | null): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
-export async function computePositions(account: KeetaAccount): Promise<PositionsResult> {
-  const balances = await readBalances(account);
-  const trades = (await listTrades(300)).filter((t) => t.status === 'executed').reverse();
+export async function computePositions(owner: string, address: string): Promise<PositionsResult> {
+  const balances = (await readPublicBalances(address)) ?? [];
+  const trades = (await listTrades(owner, 300)).filter((t) => t.status === 'executed').reverse();
 
   // Average-cost tracker over the trade history.
   const qty = new Map<string, number>();

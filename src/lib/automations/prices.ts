@@ -5,8 +5,8 @@
  * For tokens without a direct price we fall back to the Keeta FX anchor
  * estimate against USDC.
  */
-import * as KeetaNet from '@keetanetwork/keetanet-client';
 import { userClient, loadFXClient, getTokenInfo, fromDisplay } from '../keeta/network';
+import { ephemeralAccount } from '../keeta/ephemeral';
 
 const KEESPECS = process.env.KEESPECS_API ?? 'https://keespecs.xyz';
 
@@ -98,11 +98,7 @@ export async function getTokenPrice(ref: string): Promise<PriceSnapshot | null> 
   if (!token) return null;
 
   // Estimate one whole token against USDC through the FX anchor.
-  const acct = KeetaNet.lib.Account.fromSeed(
-    KeetaNet.lib.Account.generateRandomSeed({ asString: true }),
-    0,
-  );
-  await using client = userClient(acct);
+  await using client = userClient(ephemeralAccount());
   const fx = await loadFXClient(client);
   const raw = fromDisplay('1', token.decimals);
   const res = await fx.getQuotesOrEstimates({

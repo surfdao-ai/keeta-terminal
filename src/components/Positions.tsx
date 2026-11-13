@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { apiFetch } from '@/lib/client/api';
 
 interface Position {
   token: string;
@@ -28,24 +29,16 @@ const usd = (n: number | null | undefined, digits = 4): string =>
   n === null || n === undefined ? '—' : `$${n.toFixed(digits)}`;
 
 /** Positions: what you hold, what it is worth, and the PnL against cost. */
-export default function Positions({ seed }: { seed: string | null }) {
+export default function Positions() {
   const [data, setData] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
   const load = useCallback(async () => {
-    if (!seed) {
-      setData(null);
-      return;
-    }
     setLoading(true);
     setErr('');
     try {
-      const r = await fetch('/api/positions', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ seed }),
-      });
+      const r = await apiFetch('/api/positions');
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'failed');
       setData(j);
@@ -54,7 +47,7 @@ export default function Positions({ seed }: { seed: string | null }) {
     } finally {
       setLoading(false);
     }
-  }, [seed]);
+  }, []);
 
   useEffect(() => {
     // Deferred so the effect body itself does not set state synchronously.
@@ -63,15 +56,6 @@ export default function Positions({ seed }: { seed: string | null }) {
     }, 0);
     return () => clearTimeout(first);
   }, [load]);
-
-  if (!seed) {
-    return (
-      <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
-        <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">positions</div>
-        <p className="text-[11px] text-zinc-600">Unlock the wallet to see what you hold.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">

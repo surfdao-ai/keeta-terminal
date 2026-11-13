@@ -36,6 +36,11 @@ export interface VaultRecord {
   v: 1;
   mode: VaultMode;
   address: string;
+  /**
+   * A second, deliberately low-balance wallet for unattended automations.
+   * It is sealed in the same vault, so it never reaches the server either.
+   */
+  automation?: { seed: string; address: string };
   /** base64 — PRF salt (passkey) or PBKDF2 salt (passphrase). */
   salt: string;
   /** base64 — AES-GCM iv. */
@@ -100,6 +105,26 @@ export function readVault(): VaultRecord | null {
 
 export function writeVault(rec: VaultRecord): void {
   localStorage.setItem(VAULT_KEY, JSON.stringify(rec));
+}
+
+/**
+ * Add (or replace) the low-balance automation wallet inside a vault record.
+ * The record is re-sealed with the same passphrase, so the automation seed is
+ * protected exactly like the main one.
+ */
+export async function withAutomationWallet(
+  rec: VaultRecord,
+  passphrase: string,
+  seed: string,
+  address: string,
+): Promise<VaultRecord> {
+  const salt = fromB64(rec.salt);
+  const key = await passphraseKey(passphrase, salt);
+  const next: VaultRecord = { ...rec, automation: { seed, address } };
+  const { iv, ciphertext, tag } = await seal(key, seed);
+  const merged: VaultRecord = { ...next, iv, ciphertext, tag };
+  writeVault(merged);
+  return merged;
 }
 
 export function clearVault(): void {
@@ -260,6 +285,8 @@ export interface VaultOptions {
   seed: string;
   /** The public address of that seed. */
   address: string;
+  /** An optional second, low-balance wallet for automations. */
+  automation?: { seed: string; address: string };
   /** 'passkey' uses WebAuthn PRF; 'passphrase' uses PBKDF2. */
   mode: VaultMode;
   /** Required for mode='passphrase'. */
@@ -288,6 +315,7 @@ export async function createVault(opts: VaultOptions): Promise<VaultRecord> {
     v: 1,
     mode: opts.mode,
     address: opts.address,
+    ...(opts.automation ? { automation: opts.automation } : {}),
     salt: toB64(salt),
     iv,
     ciphertext,
@@ -297,15 +325,21 @@ export async function createVault(opts: VaultOptions): Promise<VaultRecord> {
   };
 }
 
-/** Unlock the vault and return the seed. */
-export async function openVault(
+/** Unlock the vault and return the seed (and the automation wallet, if any). */
+export async function openVaultFull(
   rec: VaultRecord,
   passphrase?: string,
-): Promise<string> {
+): Promise<{ seed: string; automation?: { seed: string; address: string } }> {
   const salt = fromB64(rec.salt);
   const key =
     rec.mode === 'passkey'
       ? await passkeyKey(rec.credentialId ?? '', salt)
       : await passphraseKey(passphrase ?? '', salt);
-  return open(key, rec);
+  const seed = await open(key, rec);
+  return { seed, ...(rec.automation ? { automation: rec.automation } : {}) };
+}
+
+/** Unlock the vault and return just the main seed. */
+export async function openVault(rec: VaultRecord, passphrase?: string): Promise<string> {
+  return (await openVaultFull(rec, passphrase)).seed;
 }

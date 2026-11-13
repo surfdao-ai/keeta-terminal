@@ -1,85 +1,47 @@
 /**
- * Dedicated automation wallet.
+ * The automation wallet — a separate, low-balance account the user created in
+ * their browser for unattended automations.
  *
- * Unattended automations need a key that can sign without a human present.
- * We never reuse the user's main wallet for that: the automation wallet is a
- * separate account whose seed is encrypted with a server-side key
- * (AUTOMATION_KEY env var). The user funds it explicitly, so an automation can
- * only ever move funds that were deliberately left there.
+ * The server stores its public address only. The key that signs for it lives
+ * in the browser vault, so the server can never move those funds on its own.
+ * An automation therefore *proposes* an action; the browser signs it.
  */
-import { scryptSync, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
-import * as KeetaNet from '@keetanetwork/keetanet-client';
-import type { KeetaAccount } from '../keeta/network';
-import { dbRead, dbUpdate } from '../db';
+import { dbRead, dbWrite } from '../db';
 
 export interface StoredAutomationWallet {
-  ciphertext: string;
-  iv: string;
-  tag: string;
-  salt: string;
   address: string;
   createdAt: string;
 }
 
-function serverKey(): Buffer | null {
-  const raw = process.env.AUTOMATION_KEY;
-  if (!raw || raw.length < 16) return null;
-  return scryptSync(raw, 'kterminal-automation-wallet', 32);
+const KEY = 'automationWallet';
+
+const ADDRESS_RE = /^keeta_[A-Za-z0-9]{32,}$/;
+
+export async function getAutomationWallet(owner: string): Promise<StoredAutomationWallet | null> {
+  const w = await dbRead<StoredAutomationWallet>(KEY, owner);
+  return w?.address ? w : null;
 }
 
-export function automationEnabled(): boolean {
-  return serverKey() !== null;
-}
-
-export async function getAutomationWallet(): Promise<StoredAutomationWallet | null> {
-  return dbRead<StoredAutomationWallet>('automationWallet');
-}
-
-export async function createAutomationWallet(): Promise<StoredAutomationWallet> {
-  const key = serverKey();
-  if (!key) throw new Error('AUTOMATION_KEY is not configured on the server.');
-  const existing = await getAutomationWallet();
-  if (existing) return existing;
-
-  // Compare-and-set: a concurrent creation cannot orphan the first wallet.
-  return dbUpdate<StoredAutomationWallet>('automationWallet', (current) => {
-    if (current) return current;
-
-    const seed = KeetaNet.lib.Account.generateRandomSeed({ asString: true });
-    const account = KeetaNet.lib.Account.fromSeed(seed, 0);
-    const address = account.publicKeyString.get();
-
-    const salt = randomBytes(16);
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', scryptSync(key, salt, 32), iv);
-    const ct = Buffer.concat([cipher.update(seed, 'utf8'), cipher.final()]);
-
-    return {
-      ciphertext: ct.toString('base64'),
-      iv: iv.toString('base64'),
-      tag: cipher.getAuthTag().toString('base64'),
-      salt: salt.toString('base64'),
-      address,
-      createdAt: new Date().toISOString(),
-    };
-  });
-}
-
-export async function unlockAutomationWallet(): Promise<{ account: KeetaAccount; address: string } | null> {
-  const key = serverKey();
-  if (!key) return null;
-  const w = await getAutomationWallet();
-  if (!w) return null;
-  try {
-    const decipher = createDecipheriv('aes-256-gcm', scryptSync(key, Buffer.from(w.salt, 'base64'), 32), Buffer.from(w.iv, 'base64'));
-    decipher.setAuthTag(Buffer.from(w.tag, 'base64'));
-    const seed = Buffer.concat([
-      decipher.update(Buffer.from(w.ciphertext, 'base64')),
-      decipher.final(),
-    ]).toString('utf8');
-    const account = KeetaNet.lib.Account.fromSeed(seed, 0);
-    return { account, address: account.publicKeyString.get() };
-  } catch {
-    return null;
+/**
+ * Register an automation wallet the browser created.
+ * The seed never reaches this function.
+ */
+export async function registerAutomationWallet(
+  owner: string,
+  address: string,
+): Promise<StoredAutomationWallet> {
+  if (!ADDRESS_RE.test(address.trim())) {
+    throw new Error('That does not look like a Keeta address.');
   }
+  const existing = await getAutomationWallet(owner);
+  const wallet: StoredAutomationWallet = {
+    address: address.trim(),
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+  };
+  await dbWrite(KEY, wallet, owner);
+  return wallet;
+}
+
+export async function forgetAutomationWallet(owner: string): Promise<void> {
+  await dbWrite(KEY, null, owner);
 }

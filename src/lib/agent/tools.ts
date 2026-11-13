@@ -1,18 +1,16 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import * as KeetaNet from '@keetanetwork/keetanet-client';
-import { networkAlias, userClient, loadFXClient, toDisplay, fromDisplay, getTokenInfo, readBalances, summarizeQuote, normalizeToken } from '../keeta/network';
-import { accountFromSeed } from '../keeta/wallet';
+import { networkAlias, userClient, loadFXClient, toDisplay, fromDisplay, getTokenInfo, summarizeQuote, normalizeToken } from '../keeta/network';
+import { readPublicBalances } from '../keeta/public-reads';
+import { ephemeralAccount } from '../keeta/ephemeral';
+import { tokenDecimals } from '../keeta/currencies';
 import { newPendingTrade, savePending, listTrades, capSpent, dailyCapUsd } from './safety';
 import { validateTokenSpec } from '../keeta/tokens';
 
 export interface ToolContext {
-  /** The wallet seed, sent by the browser for this request only. null = locked. */
-  seed: string | null;
-}
-
-function locked() {
-  return { error: 'Wallet is locked. Ask the user to unlock via the UI first.' };
+  /** The signed-in wallet address. No key material is ever passed to the server. */
+  owner: string;
+  address: string;
 }
 
 export function buildTools(ctx: ToolContext) {
@@ -22,10 +20,13 @@ export function buildTools(ctx: ToolContext) {
         'Get the trading account address, base token, and all balances with display amounts. Requires an unlocked wallet.',
       inputSchema: z.object({}),
       execute: async () => {
-        if (!ctx.seed) return locked();
-        const { account, address } = accountFromSeed(ctx.seed);
-        const rows = await readBalances(account);
-        return { address, network: networkAlias(), baseToken: account.publicKeyString.get(), balances: rows };
+        const rows = await readPublicBalances(ctx.address);
+        return {
+          address: ctx.address,
+          network: networkAlias(),
+          balances: rows ?? [],
+          note: rows === null ? 'Could not read the balances right now.' : undefined,
+        };
       },
     }),
 
@@ -34,8 +35,7 @@ export function buildTools(ctx: ToolContext) {
         'List the tokens tradable on Keeta — the chain-wide catalogue of every currency with an FX anchor, NOT what is in the wallet. Use get_portfolio for holdings.',
       inputSchema: z.object({}),
       execute: async () => {
-        const acct = KeetaNet.lib.Account.fromSeed(KeetaNet.lib.Account.generateRandomSeed({ asString: true }), 0);
-        await using client = userClient(acct);
+        await using client = userClient(ephemeralAccount());
         const fx = await loadFXClient(client);
         const tokens = await fx.resolver.listTokens();
 
@@ -87,15 +87,14 @@ export function buildTools(ctx: ToolContext) {
         affinity: z.enum(['from', 'to']).default('from').describe("'from' = amount is what you have; 'to' = amount is what you want"),
       }),
       execute: async ({ from, to, amount, affinity }) => {
-        const acct = KeetaNet.lib.Account.fromSeed(KeetaNet.lib.Account.generateRandomSeed({ asString: true }), 0);
-        await using client = userClient(acct);
+        await using client = userClient(ephemeralAccount());
         const fx = await loadFXClient(client);
         // resolve decimals
         const f = normalizeToken(from);
         const t = normalizeToken(to);
-        const fromInfo = await getTokenInfo(f).catch(() => ({ decimals: null }));
-        const toInfo = await getTokenInfo(t).catch(() => ({ decimals: null }));
-        const rawAmount = fromDisplay(amount, fromInfo.decimals);
+        const fromDecimals = await tokenDecimals(f);
+        const toDecimals = await tokenDecimals(t);
+        const rawAmount = fromDisplay(amount, fromDecimals);
         const res = await fx.getQuotesOrEstimates({
           from: f,
           to: t,
@@ -110,8 +109,8 @@ export function buildTools(ctx: ToolContext) {
             const e = !isQuote ? (p as { estimate: unknown }).estimate : null;
             const summary = summarizeQuote(
               { isQuote, quote: q as never, estimate: e as never },
-              fromInfo.decimals,
-              toInfo.decimals,
+              fromDecimals,
+              toDecimals,
             );
             return {
               providerId: String((p as { provider?: { providerID?: unknown } }).provider?.providerID ?? 'unknown'),
@@ -119,8 +118,8 @@ export function buildTools(ctx: ToolContext) {
               ...summary,
             };
           }),
-          fromDecimals: fromInfo.decimals,
-          toDecimals: toInfo.decimals,
+          fromDecimals: fromDecimals,
+          toDecimals: toDecimals,
         };
       },
     }),
@@ -137,12 +136,11 @@ export function buildTools(ctx: ToolContext) {
       execute: async ({ from, to, amount, affinity }) => {
         const f = normalizeToken(from);
         const t = normalizeToken(to);
-        const fromInfo = await getTokenInfo(f).catch(() => ({ decimals: null }));
-        const toInfo = await getTokenInfo(t).catch(() => ({ decimals: null }));
-        const rawAmount = fromDisplay(amount, fromInfo.decimals);
+        const fromDecimals = await tokenDecimals(f);
+        const toDecimals = await tokenDecimals(t);
+        const rawAmount = fromDisplay(amount, fromDecimals);
 
-        const acct = KeetaNet.lib.Account.fromSeed(KeetaNet.lib.Account.generateRandomSeed({ asString: true }), 0);
-        await using client = userClient(acct);
+        await using client = userClient(ephemeralAccount());
         const fx = await loadFXClient(client);
 
         const quotes = await fx.getQuotes({ from: f, to: t, amount: rawAmount, affinity } as unknown as Parameters<typeof fx.getQuotes>[0]);
@@ -160,14 +158,14 @@ export function buildTools(ctx: ToolContext) {
             ? {
                 provider: String((binding as { provider?: { providerID?: unknown } })?.provider?.providerID ?? 'unknown'),
                 convertedAmount: binding.quote?.convertedAmount?.toString() ?? null,
-                display: toDisplay(binding.quote?.convertedAmount ?? 0n, toInfo.decimals),
+                display: toDisplay(binding.quote?.convertedAmount ?? 0n, toDecimals),
               }
             : null,
           estimate: estimate
             ? {
                 provider: String((estimate as { provider?: { providerID?: unknown } })?.provider?.providerID ?? 'unknown'),
                 convertedAmount: estimate.estimate?.convertedAmount?.toString() ?? null,
-                display: toDisplay(estimate.estimate?.convertedAmount ?? 0n, toInfo.decimals),
+                display: toDisplay(estimate.estimate?.convertedAmount ?? 0n, toDecimals),
                 canPerformExchange: estimate.estimate?.canPerformExchange ?? null,
               }
             : null,
@@ -190,20 +188,19 @@ export function buildTools(ctx: ToolContext) {
         affinity: z.enum(['from', 'to']).default('from'),
       }),
       execute: async ({ from, to, amount, affinity }) => {
-        const acct = KeetaNet.lib.Account.fromSeed(KeetaNet.lib.Account.generateRandomSeed({ asString: true }), 0);
-        await using client = userClient(acct);
+        await using client = userClient(ephemeralAccount());
         const fx = await loadFXClient(client);
         const f = normalizeToken(from);
         const t = normalizeToken(to);
-        const fromInfo = await getTokenInfo(f).catch(() => ({ decimals: null }));
-        const toInfo = await getTokenInfo(t).catch(() => ({ decimals: null }));
-        const rawAmount = fromDisplay(amount, fromInfo.decimals);
+        const fromDecimals = await tokenDecimals(f);
+        const toDecimals = await tokenDecimals(t);
+        const rawAmount = fromDisplay(amount, fromDecimals);
         const res = await fx.getQuotes({ from: f, to: t, amount: rawAmount, affinity } as unknown as Parameters<typeof fx.getQuotes>[0]);
         if (!res || res.length === 0) return { providers: [], note: 'No binding quotes available right now.' };
         return {
           providers: res.map((p) => ({
             providerId: String((p as { provider?: { providerID?: unknown } }).provider?.providerID ?? 'unknown'),
-            ...summarizeQuote({ isQuote: true, quote: (p as { quote: unknown }).quote as never }, fromInfo.decimals, toInfo.decimals),
+            ...summarizeQuote({ isQuote: true, quote: (p as { quote: unknown }).quote as never }, fromDecimals, toDecimals),
           })),
         };
       },
@@ -222,18 +219,18 @@ export function buildTools(ctx: ToolContext) {
         const f = normalizeToken(from);
         const t = normalizeToken(to);
         const pending = newPendingTrade({ kind: 'swap', fromToken: f, toToken: t, amount, affinity });
-        await savePending(pending);
+        await savePending(ctx.owner, pending);
         // best-effort estimate for display
         let preview: unknown = null;
         try {
-          const acct = KeetaNet.lib.Account.fromSeed(KeetaNet.lib.Account.generateRandomSeed({ asString: true }), 0);
-          await using client = userClient(acct);
+          await using client = userClient(ephemeralAccount());
           const fx = await loadFXClient(client);
-        const fromInfo = await getTokenInfo(f).catch(() => ({ decimals: null }));
-          const toInfo = await getTokenInfo(t).catch(() => ({ decimals: null }));
-          const rawAmount = fromDisplay(amount, fromInfo.decimals);
+        // The decimals decide the raw amount: KTA has 18, the stablecoins 6.
+          const fromDecimals = await tokenDecimals(f);
+          const toDecimals = await tokenDecimals(t);
+          const rawAmount = fromDisplay(amount, fromDecimals);
           const res = await fx.getQuotesOrEstimates({ from: f, to: t, amount: rawAmount, affinity } as unknown as Parameters<typeof fx.getQuotesOrEstimates>[0]);
-          preview = res?.[0] ? summarizeQuote({ isQuote: (res[0] as { isQuote: boolean }).isQuote, quote: (res[0] as { quote?: unknown }).quote as never, estimate: (res[0] as { estimate?: unknown }).estimate as never }, fromInfo.decimals, toInfo.decimals) : null;
+          preview = res?.[0] ? summarizeQuote({ isQuote: (res[0] as { isQuote: boolean }).isQuote, quote: (res[0] as { quote?: unknown }).quote as never, estimate: (res[0] as { estimate?: unknown }).estimate as never }, fromDecimals, toDecimals) : null;
         } catch {
           preview = null;
         }
@@ -263,7 +260,7 @@ export function buildTools(ctx: ToolContext) {
           affinity: 'from',
           token: spec,
         });
-        await savePending(pending);
+        await savePending(ctx.owner, pending);
         return {
           tokenLaunchId: pending.id,
           expiresAt: pending.expiresAt,
@@ -276,15 +273,15 @@ export function buildTools(ctx: ToolContext) {
     get_trade_history: tool({
       description: 'Get recent executed/failed trades from the terminal log.',
       inputSchema: z.object({ limit: z.number().int().min(1).max(100).default(20) }),
-      execute: async ({ limit }) => ({ trades: await listTrades(limit) }),
+      execute: async ({ limit }) => ({ trades: await listTrades(ctx.owner, limit) }),
     }),
 
     get_cap_status: tool({
       description: 'Show today\'s spend vs the daily cap.',
       inputSchema: z.object({}),
       execute: async () => {
-        const cap = await dailyCapUsd();
-        const spent = await capSpent();
+        const cap = await dailyCapUsd(ctx.owner);
+        const spent = await capSpent(ctx.owner);
         return {
           spentUsd: spent,
           capUsd: cap,

@@ -333,14 +333,25 @@ async function backend(): Promise<KVBackend> {
   return fileDB;
 }
 
-export async function dbRead<T = unknown>(key: string): Promise<T | null> {
-  const db = await backend();
-  return (await db.read<T>(key)).value;
+/**
+ * The storage key for an owner-scoped record.
+ *
+ * Every record belongs to a wallet address, so one visitor can never see or
+ * overwrite another's state. The `u:` prefix keeps the scoped namespace
+ * separate from anything stored before scoping existed.
+ */
+export function scopedKey(owner: string, key: string): string {
+  return `u:${owner.trim().toLowerCase()}:${key}`;
 }
 
-export async function dbWrite(key: string, value: unknown): Promise<void> {
+export async function dbRead<T = unknown>(key: string, owner?: string): Promise<T | null> {
   const db = await backend();
-  await db.overwrite(key, value);
+  return (await db.read<T>(owner ? scopedKey(owner, key) : key)).value;
+}
+
+export async function dbWrite(key: string, value: unknown, owner?: string): Promise<void> {
+  const db = await backend();
+  await db.overwrite(owner ? scopedKey(owner, key) : key, value);
 }
 
 /**
@@ -388,20 +399,21 @@ async function withKeyLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 export async function dbUpdate<T>(
   key: string,
   mutate: (current: T | null) => T | Promise<T>,
-  opts?: { attempts?: number },
+  opts?: { attempts?: number; owner?: string },
 ): Promise<T> {
   const attempts = opts?.attempts ?? 20;
   const db = await backend();
+  const storageKey = opts?.owner ? scopedKey(opts.owner, key) : key;
 
-  return withKeyLock(key, async () => {
+  return withKeyLock(storageKey, async () => {
     for (let attempt = 0; attempt < attempts; attempt++) {
       // Desynchronise the writers before reading.
       if (attempt > 0) await sleep(Math.random() * 15);
 
-      const { value, rev } = await db.read<T>(key);
+      const { value, rev } = await db.read<T>(storageKey);
       const next = await mutate(value);
       try {
-        await db.write(key, next, rev);
+        await db.write(storageKey, next, rev);
         return next;
       } catch (e) {
         if (!(e instanceof StoreConflictError)) throw e;
