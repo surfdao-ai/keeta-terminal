@@ -33,6 +33,38 @@ interface LogEntry {
   message: string;
 }
 
+/** Small trash can used by the watchlist. */
+function TrashIcon({ className = 'w-3.5 h-3.5' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M2.5 4.2h11" />
+      <path d="M6.4 4.2V3a1 1 0 0 1 1-1h1.2a1 1 0 0 1 1 1v1.2" />
+      <path d="M3.8 4.2l.6 8.4a1.2 1.2 0 0 0 1.2 1.1h4.8a1.2 1.2 0 0 0 1.2-1.1l.6-8.4" />
+      <path d="M6.6 6.6v4.6M9.4 6.6v4.6" />
+    </svg>
+  );
+}
+
+interface WatchEntry {
+  id: string;
+  symbol: string;
+  address?: string;
+  label?: string;
+  lastPriceUsd?: number;
+  lastChange24hPct?: number | null;
+  lastCheckedAt?: string;
+  createdAt: string;
+}
+
 interface WalletInfo {
   address: string | null;
   createdAt?: string;
@@ -54,6 +86,10 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
 
+  const [watch, setWatch] = useState<WatchEntry[]>([]);
+  const [watchSymbol, setWatchSymbol] = useState('KTA');
+  const [watchBusy, setWatchBusy] = useState(false);
+
   const [kind, setKind] = useState<'alert' | 'recurring'>('alert');
   const [name, setName] = useState('');
   const [symbol, setSymbol] = useState('KTA');
@@ -73,6 +109,12 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
     setWallet(j.wallet ?? { address: null });
     setKeyConfigured(Boolean(j.automationKeyConfigured));
     setMinEvery(j.minEveryMinutes ?? 15);
+
+    const w = await fetch('/api/watchlist');
+    if (w.ok) {
+      const wj = await w.json();
+      setWatch(wj.watchlist ?? []);
+    }
   }, []);
 
   useEffect(() => {
@@ -136,6 +178,27 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
     await load();
   }
 
+  async function watchAction(action: 'add' | 'remove' | 'refresh', extra: Record<string, string> = {}) {
+    setWatchBusy(true);
+    try {
+      const r = await fetch('/api/watchlist', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action, ...extra }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'failed');
+      if (j.watchlist) setWatch(j.watchlist);
+      else await load();
+      return true;
+    } catch (err) {
+      onNotice(`err  ${(err as Error).message}`);
+      return false;
+    } finally {
+      setWatchBusy(false);
+    }
+  }
+
   async function runNow() {
     setRunning(true);
     try {
@@ -169,6 +232,89 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
 
   return (
     <div className="space-y-4 max-w-3xl">
+      {/* watchlist */}
+      <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-mono text-[13px] font-semibold">watchlist</h2>
+          <button
+            onClick={() => watchAction('refresh')}
+            disabled={watchBusy || !watch.length}
+            className="font-mono text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40"
+          >
+            {watchBusy ? '...' : 'refresh prices'}
+          </button>
+        </div>
+
+        {watch.length === 0 ? (
+          <p className="text-[11px] text-zinc-600">
+            Nothing watched yet. Add a ticker (KTA, USDC) or a token address — prices come from the free
+            Keeta reads.
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            {watch.map((w) => (
+              <div key={w.id} className="flex items-center gap-3 bg-[#09090B] rounded-lg px-3 py-2">
+                <span className="font-mono text-[13px] text-zinc-200 w-20 truncate">{w.symbol}</span>
+                <span className="font-mono text-[13px] text-emerald-300">
+                  {w.lastPriceUsd !== undefined ? `$${w.lastPriceUsd.toFixed(5)}` : '—'}
+                </span>
+                <span
+                  className={`font-mono text-[11px] ${
+                    (w.lastChange24hPct ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-400'
+                  }`}
+                >
+                  {w.lastChange24hPct !== undefined && w.lastChange24hPct !== null
+                    ? `${w.lastChange24hPct >= 0 ? '+' : ''}${w.lastChange24hPct.toFixed(2)}%`
+                    : ''}
+                </span>
+                <span className="ml-auto font-mono text-[10px] text-zinc-600">
+                  {w.lastCheckedAt ? new Date(w.lastCheckedAt).toISOString().slice(11, 16) : ''}
+                </span>
+                <button
+                  onClick={() => {
+                    setKind('alert');
+                    setSymbol(w.symbol);
+                    setName(`${w.symbol} alert`);
+                    document.getElementById('new-automation')?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="shrink-0 font-mono text-[10px] px-1.5 py-1 rounded border border-zinc-800 text-zinc-500 hover:border-purple-700 hover:text-purple-300"
+                >
+                  alert
+                </button>
+                <button
+                  onClick={() => watchAction('remove', { id: w.id })}
+                  aria-label={`stop watching ${w.symbol}`}
+                  className="shrink-0 p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-red-950/40"
+                >
+                  <TrashIcon />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (await watchAction('add', { symbol: watchSymbol })) setWatchSymbol('');
+          }}
+          className="mt-3 flex gap-2"
+        >
+          <input
+            value={watchSymbol}
+            onChange={(e) => setWatchSymbol(e.target.value)}
+            placeholder="KTA, USDC or a token address"
+            className="flex-1 px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-[13px] text-[#F7F7F7] focus:outline-none focus:border-purple-600"
+          />
+          <button
+            disabled={watchBusy || !watchSymbol.trim()}
+            className="shrink-0 px-3 py-2 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-[13px] text-white"
+          >
+            watch
+          </button>
+        </form>
+      </div>
+
       {/* automation wallet */}
       <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
         <div className="flex items-center justify-between mb-3">
@@ -209,7 +355,7 @@ export default function Automations({ unlocked, seed, onNotice }: Props) {
       </div>
 
       {/* create */}
-      <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5">
+      <div id="new-automation" className="bg-[#141416] border border-zinc-800 rounded-2xl p-5 scroll-mt-24">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-mono text-[13px] font-semibold">new automation</h2>
           <button

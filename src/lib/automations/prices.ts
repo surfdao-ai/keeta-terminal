@@ -66,8 +66,14 @@ export async function resolveToken(ref: string): Promise<TokenRef | null> {
   return null;
 }
 
-/** Spot price in USD for a token. */
-export async function getTokenPriceUsd(ref: string): Promise<number | null> {
+export interface PriceSnapshot {
+  priceUsd: number;
+  /** 24-hour change as a percentage, when the source reports one. */
+  change24hPct: number | null;
+}
+
+/** Spot price in USD for a token, with the 24h change when it is available. */
+export async function getTokenPrice(ref: string): Promise<PriceSnapshot | null> {
   const upper = ref.trim().toUpperCase();
 
   // KTA has a dedicated free price read on KeeSpecs.
@@ -75,8 +81,13 @@ export async function getTokenPriceUsd(ref: string): Promise<number | null> {
     try {
       const res = await fetch(`${KEESPECS}/api/price`, { headers: { accept: 'application/json' } });
       if (res.ok) {
-        const json = (await res.json()) as { priceUsd?: number };
-        if (typeof json.priceUsd === 'number') return json.priceUsd;
+        const json = (await res.json()) as { priceUsd?: number; change24hPct?: number };
+        if (typeof json.priceUsd === 'number') {
+          return {
+            priceUsd: json.priceUsd,
+            change24hPct: typeof json.change24hPct === 'number' ? json.change24hPct : null,
+          };
+        }
       }
     } catch {
       /* fall through */
@@ -107,5 +118,11 @@ export async function getTokenPriceUsd(ref: string): Promise<number | null> {
   const converted = isQuote
     ? (first as { quote: { convertedAmount: bigint } }).quote.convertedAmount
     : (first as { estimate: { convertedAmount: bigint } }).estimate.convertedAmount;
-  return Number(converted) / 10 ** USDC_DECIMALS;
+  // The FX estimate is a spot price with no 24h history.
+  return { priceUsd: Number(converted) / 10 ** USDC_DECIMALS, change24hPct: null };
+}
+
+/** Spot price in USD for a token. */
+export async function getTokenPriceUsd(ref: string): Promise<number | null> {
+  return (await getTokenPrice(ref))?.priceUsd ?? null;
 }

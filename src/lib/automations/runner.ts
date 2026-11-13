@@ -15,6 +15,7 @@ import {
   type Automation,
 } from './store';
 import { getTokenPriceUsd } from './prices';
+import { refreshWatchlist } from './watchlist';
 import { unlockAutomationWallet, getAutomationWallet } from './wallet';
 import { executeSwap, exchangeStatus, type SwapResult } from '../keeta/swap';
 
@@ -213,6 +214,14 @@ export async function runAutomations(opts: { allowSwaps: boolean }): Promise<Run
   }
 
   await patchAutomations(patches);
+
+  // Keep the watchlist prices fresh even when nobody has the UI open.
+  try {
+    await refreshWatchlist();
+  } catch {
+    /* a price read failing must not fail the run */
+  }
+
   return report;
 }
 
