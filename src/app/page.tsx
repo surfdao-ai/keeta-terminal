@@ -167,18 +167,16 @@ export default function Home() {
     setNavOpen(false);
   }
 
+  /**
+   * Start a new chat. It is only written to the server once it has messages,
+   * so the sidebar does not fill up with empty "new chat" entries.
+   */
   async function newChat() {
     const id = crypto.randomUUID();
-    await fetch('/api/chats', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id, title: 'new chat', messages: [] }),
-    });
     setActiveChatId(id);
     setActiveMessages([]);
     setView('chat');
     setNavOpen(false);
-    await loadChats();
   }
 
   async function removeChat(id: string) {
@@ -224,7 +222,6 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     // The first poll is deferred so the effect body itself does not set

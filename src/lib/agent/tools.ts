@@ -31,14 +31,43 @@ export function buildTools(ctx: ToolContext) {
 
     list_tokens: tool({
       description:
-        'List all tokens available for trading via Keeta FX anchors (currency codes + token addresses).',
+        'List the tokens tradable on Keeta — the chain-wide catalogue of every currency with an FX anchor, NOT what is in the wallet. Use get_portfolio for holdings.',
       inputSchema: z.object({}),
       execute: async () => {
         const acct = KeetaNet.lib.Account.fromSeed(KeetaNet.lib.Account.generateRandomSeed({ asString: true }), 0);
         await using client = userClient(acct);
         const fx = await loadFXClient(client);
         const tokens = await fx.resolver.listTokens();
-        return { tokens };
+
+        const rows = await Promise.all(
+          tokens.map(async (t) => {
+            const code = String(t.currency ?? '').replace(/^\$/, '');
+            let name = '';
+            let decimals: number | null = null;
+            try {
+              const info = await getTokenInfo(t.token);
+              name = info.name ?? '';
+              decimals = info.decimals ?? null;
+            } catch {
+              /* the catalogue still works without the metadata */
+            }
+            return { code, name, address: t.token, decimals };
+          }),
+        );
+        rows.sort((a, b) => a.code.localeCompare(b.code));
+
+        return {
+          scope: 'every token with a Keeta FX anchor (chain-wide, not your wallet)',
+          count: rows.length,
+          tokens: rows,
+          // Pre-formatted so the terminal shows a table instead of raw objects.
+          lines: rows.map(
+            (r) =>
+              `${(r.code || '?').padEnd(6)} ${(r.name || '-').slice(0, 26).padEnd(26)} ${r.address.slice(0, 20)}…${
+                r.decimals !== null ? ` ${r.decimals}dp` : ''
+              }`,
+          ),
+        };
       },
     }),
 

@@ -16,7 +16,7 @@ import {
 } from './store';
 import { getTokenPriceUsd } from './prices';
 import { unlockAutomationWallet, getAutomationWallet } from './wallet';
-import { executeSwap, type SwapResult } from '../keeta/swap';
+import { executeSwap, exchangeStatus, type SwapResult } from '../keeta/swap';
 
 export interface RunReport {
   checked: number;
@@ -126,6 +126,41 @@ export async function runAutomations(opts: { allowSwaps: boolean }): Promise<Run
       continue;
     }
 
+    // Reconcile a swap that was submitted earlier but has not settled yet.
+    if (a.lastStatus === 'submitted' && a.lastExchangeId) {
+      try {
+        const settled = await exchangeStatus(
+          unlocked.account,
+          a.lastExchangeId,
+          { from: a.fromToken, to: a.toToken, amount: a.amount, affinity: 'from' },
+          a.lastProviderId ?? null,
+        );
+        if (settled.status === 'completed') {
+          patch(a.id, {
+            lastStatus: 'executed',
+            lastMessage: 'the earlier swap settled',
+            lastExchangeId: null,
+          });
+          report.executed++;
+          report.details.push(`recurring ${a.name}: the earlier swap settled`);
+          await recordSpend(Math.min(a.usdValue ?? 0, MAX_AUTOMATION_USD));
+          continue;
+        }
+        if (settled.status === 'failed') {
+          patch(a.id, {
+            lastStatus: 'failed',
+            lastMessage: 'the earlier swap failed',
+            lastExchangeId: null,
+          });
+          report.failed++;
+          report.details.push(`recurring ${a.name}: the earlier swap failed`);
+          continue;
+        }
+      } catch {
+        /* fall through and try a new swap */
+      }
+    }
+
     let result: SwapResult;
     try {
       result = await executeSwap(unlocked.account, {
@@ -135,26 +170,35 @@ export async function runAutomations(opts: { allowSwaps: boolean }): Promise<Run
         affinity: 'from',
       });
     } catch (e) {
-      result = { ok: false, usdValue: 0, error: (e as Error).message };
+      result = { ok: false, status: 'failed', usdValue: 0, error: (e as Error).message };
     }
 
     const ranAt = new Date().toISOString();
     const nextAt = nextRunAt(a.everyMinutes, now);
+    const settled = result.ok && result.status !== 'pending';
     const message = result.ok
-      ? `${a.amount} ${a.fromToken} -> ${result.convertedAmount} ${a.toToken}`
+      ? result.status === 'pending'
+        ? `${a.amount} ${a.fromToken} -> ${result.convertedAmount} ${a.toToken} (submitted, awaiting settlement)`
+        : `${a.amount} ${a.fromToken} -> ${result.convertedAmount} ${a.toToken}`
       : (result.error ?? 'swap failed');
 
     patch(a.id, {
       lastRunAt: ranAt,
       nextRunAt: nextAt,
-      lastStatus: result.ok ? 'executed' : 'failed',
+      lastStatus: result.ok ? (settled ? 'executed' : 'submitted') : 'failed',
       lastMessage: message,
+      usdValue: result.usdValue,
+      lastExchangeId: result.ok && !settled ? (result.exchangeId ?? null) : null,
+      lastProviderId: result.ok && !settled ? (result.provider ?? null) : null,
     });
 
-    if (result.ok) {
+    if (result.ok && settled) {
       report.executed++;
       await recordSpend(Math.min(result.usdValue, MAX_AUTOMATION_USD));
       report.details.push(`recurring ${a.name}: executed (${message})`);
+    } else if (result.ok) {
+      // Submitted but not settled: the next run checks the exchange status.
+      report.details.push(`recurring ${a.name}: submitted (${message})`);
     } else {
       report.failed++;
       report.details.push(`recurring ${a.name}: failed (${message})`);
@@ -163,7 +207,7 @@ export async function runAutomations(opts: { allowSwaps: boolean }): Promise<Run
     await appendLog({
       automationId: a.id,
       kind: 'recurring',
-      status: result.ok ? 'executed' : 'failed',
+      status: result.ok ? (settled ? 'executed' : 'submitted') : 'failed',
       message,
     });
   }

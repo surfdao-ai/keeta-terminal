@@ -34,9 +34,19 @@ export async function POST(req: Request) {
     const id = existing?.id ?? body.id ?? crypto.randomUUID();
     const now = new Date().toISOString();
 
+    // The title is the placeholder until there is a first user message to
+    // name it after.
+    const derived = deriveTitle(messages);
+    const current = existing?.title ?? '';
+    const title =
+      body.title?.trim() ||
+      (!current || current === 'new chat' ? derived : current) ||
+      current ||
+      derived;
+
     const chat = await saveChat({
       id,
-      title: body.title?.trim() || existing?.title || deriveTitle(messages),
+      title,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       messages,

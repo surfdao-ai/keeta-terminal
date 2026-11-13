@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { userClient, loadFXClient, toDisplay, fromDisplay, getTokenInfo } from '@/lib/keeta/network';
 import { loadPending, removePending, appendTrade, capSpent, addCapSpend, dailyCapUsd, isExpired } from '@/lib/agent/safety';
 import { accountFromSeed } from '@/lib/keeta/wallet';
+import { readExchange } from '@/lib/keeta/swap';
 import { launchToken } from '@/lib/keeta/tokens';
 
 
@@ -103,10 +104,32 @@ export async function POST(req: Request) {
 
     // execute
     const exchange = await (provider as { createExchange: (i: unknown) => Promise<unknown> }).createExchange({ quote: q });
-    const exchangeId = (exchange as { exchange?: { id?: string } })?.exchange?.id ?? null;
+    const { exchangeId, status, blockhash } = readExchange(exchange);
+    const settled = status !== 'pending';
 
     await removePending(tradeId);
-    if (usdValue > 0) await addCapSpend(usdValue);
+
+    if (status === 'failed') {
+      await appendTrade({
+        id: tradeId,
+        kind: 'swap',
+        fromToken: pending.fromToken,
+        toToken: pending.toToken,
+        amount: pending.amount,
+        affinity: pending.affinity,
+        convertedAmount: '0',
+        provider: String(provider.provider?.providerID ?? 'unknown'),
+        exchangeId,
+        createdAt: new Date().toISOString(),
+        status: 'failed',
+        error: 'The FX provider rejected the exchange.',
+        capSpentUsd: 0,
+      });
+      return NextResponse.json({ error: 'The FX provider rejected the exchange.' }, { status: 409 });
+    }
+
+    // Only a settled swap counts against the cap.
+    if (settled && usdValue > 0) await addCapSpend(usdValue);
     await appendTrade({
       id: tradeId,
       kind: 'swap',
@@ -124,11 +147,16 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      status: settled ? 'completed' : 'pending',
       convertedAmount: convertedDisplay,
       provider: String(provider.provider?.providerID ?? 'unknown'),
       exchangeId,
-      capSpentUsd: usdValue,
+      blockhash,
+      capSpentUsd: settled ? usdValue : 0,
       newCapSpent: await capSpent(),
+      ...(settled
+        ? {}
+        : { note: 'The provider accepted the swap; settlement is pending. The cap is charged once it settles.' }),
     });
   } catch (e) {
     await removePending(tradeId).catch(() => {});

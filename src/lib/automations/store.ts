@@ -39,8 +39,14 @@ export type Automation =
       createdAt: string;
       nextRunAt: string;
       lastRunAt?: string;
-      lastStatus?: 'executed' | 'failed' | 'skipped';
+      lastStatus?: 'executed' | 'submitted' | 'failed' | 'skipped';
       lastMessage?: string;
+      /** USD value of the last swap, so a pending one can be capped on settle. */
+      usdValue?: number;
+      /** Exchange id of a swap that was submitted but has not settled yet. */
+      lastExchangeId?: string | null;
+      /** FX provider that accepted the pending swap. */
+      lastProviderId?: string | null;
     };
 
 export interface AutomationLogEntry {
@@ -48,7 +54,7 @@ export interface AutomationLogEntry {
   at: string;
   automationId: string;
   kind: Automation['kind'];
-  status: 'triggered' | 'executed' | 'failed' | 'skipped';
+  status: 'triggered' | 'executed' | 'submitted' | 'failed' | 'skipped';
   message: string;
 }
 

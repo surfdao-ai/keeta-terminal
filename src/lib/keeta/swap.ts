@@ -15,11 +15,21 @@ export interface SwapRequest {
   affinity: 'from' | 'to';
 }
 
+/**
+ * How far the swap got:
+ *   completed — settled on-chain (blockhash present)
+ *   pending   — the provider accepted the exchange, settlement not final yet
+ *   failed    — the provider rejected it
+ */
+export type SwapStatus = 'completed' | 'pending' | 'failed';
+
 export interface SwapResult {
   ok: boolean;
+  status?: SwapStatus;
   convertedAmount?: string;
   provider?: string;
   exchangeId?: string | null;
+  blockhash?: string | null;
   usdValue: number;
   error?: string;
 }
@@ -29,6 +39,35 @@ export function usdValueOf(token: string, amountDisplay: string, tokenSymbol?: s
   const sym = (tokenSymbol ?? '').toUpperCase();
   if (sym.includes('USD')) return Number(amountDisplay) || 0;
   return 0;
+}
+
+interface ExchangeShape {
+  ok?: boolean;
+  error?: string;
+  exchangeID?: string;
+  status?: string;
+  blockhash?: string;
+  exchange?: { exchangeID?: string; status?: string; blockhash?: string };
+}
+
+/** Read the exchange id and status out of the provider's response. */
+export function readExchange(result: unknown): {
+  exchangeId: string | null;
+  status: SwapStatus | 'unknown';
+  blockhash: string | null;
+} {
+  const r = (result ?? {}) as ExchangeShape;
+  // The SDK's type says { provider, exchange }, but the implementation returns
+  // the raw response — support both shapes.
+  const ex = r.exchange ?? r;
+  const raw = String(ex.status ?? '').toLowerCase();
+  const status: SwapStatus | 'unknown' =
+    raw === 'completed' || raw === 'pending' || raw === 'failed' ? (raw as SwapStatus) : 'unknown';
+  return {
+    exchangeId: ex.exchangeID ?? null,
+    status,
+    blockhash: ex.blockhash ?? null,
+  };
 }
 
 export async function executeSwap(
@@ -53,6 +92,7 @@ export async function executeSwap(
   if (!quotes || quotes.length === 0) {
     return {
       ok: false,
+      status: 'failed',
       usdValue: 0,
       error: 'No binding quotes available right now (estimates only).',
     };
@@ -68,13 +108,61 @@ export async function executeSwap(
   const exchange = await (
     provider as { createExchange: (i: unknown) => Promise<unknown> }
   ).createExchange({ quote });
-  const exchangeId = (exchange as { exchange?: { id?: string } })?.exchange?.id ?? null;
+  const { exchangeId, status, blockhash } = readExchange(exchange);
+
+  if (status === 'failed') {
+    return {
+      ok: false,
+      status: 'failed',
+      convertedAmount: convertedDisplay,
+      provider: String(provider.provider?.providerID ?? 'unknown'),
+      exchangeId,
+      usdValue,
+      error: 'The FX provider rejected the exchange.',
+    };
+  }
 
   return {
     ok: true,
+    status: status === 'unknown' ? 'completed' : status,
     convertedAmount: convertedDisplay,
     provider: String(provider.provider?.providerID ?? 'unknown'),
     exchangeId,
+    blockhash,
     usdValue,
   };
+}
+
+/**
+ * Check whether an exchange we submitted earlier has settled.
+ *
+ * The exchange status lives on the FX *provider* that handled it, so the
+ * provider is resolved from the conversion again and matched by its id.
+ */
+export async function exchangeStatus(
+  account: KeetaAccount,
+  exchangeId: string,
+  req: SwapRequest,
+  providerId?: string | null,
+): Promise<{ status: SwapStatus | 'unknown'; blockhash: string | null }> {
+  const fromInfo = await getTokenInfo(req.from).catch(() => ({ decimals: null }));
+  const rawAmount = fromDisplay(req.amount, fromInfo.decimals);
+
+  await using client = userClient(account);
+  const fx = await loadFXClient(client);
+
+  const providers = await fx.getBaseProvidersForConversion({
+    from: req.from,
+    to: req.to,
+    amount: rawAmount,
+    affinity: req.affinity,
+  } as unknown as Parameters<typeof fx.getBaseProvidersForConversion>[0]);
+
+  const provider =
+    providers?.find((p) => String(p.providerID) === String(providerId)) ?? providers?.[0];
+  if (!provider) return { status: 'unknown', blockhash: null };
+
+  const res = await provider.getExchangeStatus(exchangeId);
+  const { status, blockhash } = readExchange(res);
+  return { status, blockhash };
 }
