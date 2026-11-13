@@ -101,8 +101,15 @@ check "delete removes the alert" gone "$gone"
 
 echo
 echo "== api: chat with the free provider + skills =="
-stream=$(curl -sS -N --max-time 300 -X POST $BASE/api/chat -H 'content-type: application/json' \
-  -d "{\"messages\":[{\"id\":\"m1\",\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"text\":\"Call list_skills, then read_skill for read-prices, then get_portfolio. Be brief.\"}]}],\"providerConfig\":{\"type\":\"openai-compatible\",\"name\":\"pollinations\",\"baseUrl\":\"https://text.pollinations.ai/openai\",\"model\":\"openai-fast\"},\"seed\":\"$SEED\"}")
+# The free provider answers one request at a time per IP and its model is
+# occasionally flaky, so retry before declaring a failure.
+stream=""
+for attempt in 1 2 3; do
+  stream=$(curl -sS -N --max-time 300 -X POST $BASE/api/chat -H 'content-type: application/json' \
+    -d "{\"messages\":[{\"id\":\"m1\",\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"text\":\"Call list_skills, then read_skill for read-prices, then get_portfolio. Be brief.\"}]}],\"providerConfig\":{\"type\":\"openai-compatible\",\"name\":\"pollinations\",\"baseUrl\":\"https://text.pollinations.ai/openai\",\"model\":\"openai-fast\"},\"seed\":\"$SEED\"}")
+  if echo "$stream" | grep -q '"toolName":"ks_list_skills"'; then break; fi
+  sleep 20
+done
 tools=$(echo "$stream" | grep -o '"toolName":"[^"]*"' | sort -u | tr '\n' ' ')
 if echo "$tools" | grep -q "ks_list_skills"; then printf 'PASS  %-46s %s\n' "agent called ks_list_skills" "$tools"
 else printf 'FAIL  %-46s %s\n' "agent called ks_list_skills" "$tools"; fails=$((fails+1)); fi
