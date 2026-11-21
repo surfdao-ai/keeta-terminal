@@ -144,6 +144,29 @@ await signInWithWallet(setup.seed, setup.address);
 globalThis.fetch = originalFetch;
 check('no request body carried a seed', !sawSeed);
 
+// Self-cleanup: the throwaway wallets leave no rows behind.
+for (const wallet of [
+  { seed: setup.seed, address: setup.address },
+  { seed: otherSeed, address: imported.address },
+]) {
+  try {
+    clearCookies();
+    await signInWithWallet(wallet.seed, wallet.address);
+    const r = await fetch(`${BASE}/api/wallet`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-kt-csrf': cookies.get('kt_csrf') ?? '',
+        cookie: [...cookies].map(([k, v]) => `${k}=${v}`).join('; '),
+      },
+      body: JSON.stringify({ action: 'delete' }),
+    });
+    if (r.ok) console.log(`cleaned up ${wallet.address.slice(0, 20)}…`);
+  } catch {
+    /* the wallet was disposable; a failed cleanup is not a test failure */
+  }
+}
+
 console.log(`\n${failures === 0 ? 'ALL WALLET FLOW CHECKS PASSED' : failures + ' CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);
 

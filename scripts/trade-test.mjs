@@ -101,6 +101,16 @@ async function seedProposal(owner) {
   return proposal.id;
 }
 
+/** Self-cleanup: the throwaway wallet leaves no rows behind. */
+async function cleanupWallet() {
+  try {
+    const r = await req('/api/wallet', { method: 'POST', json: { action: 'delete' } });
+    if (r.ok) console.log(`cleaned up ${address.slice(0, 20)}…`);
+  } catch {
+    /* the wallet was disposable; a failed cleanup is not a test failure */
+  }
+}
+
 // Sign in.
 const nonce = await (await req('/api/auth/nonce', { method: 'POST' })).json();
 const sig = await account.sign(new TextEncoder().encode(nonce.nonce).buffer);
@@ -169,6 +179,7 @@ if (!tradeId) {
 
 if (!tradeId) {
   console.log('\nno proposal to work with — cannot continue');
+  await cleanupWallet();
   process.exit(failures === 0 ? 0 : 1);
 }
 
@@ -184,6 +195,7 @@ if (!prepJson.intent) {
     '\nthe flow stopped exactly where it should: before anything is signed.',
   );
   console.log(`\n${failures === 0 ? 'TRADE FLOW OK (market dry)' : failures + ' CHECK(S) FAILED'}`);
+  await cleanupWallet();
   process.exit(failures === 0 ? 0 : 1);
 }
 
@@ -244,4 +256,5 @@ check(
 check('no seed was sent to the server', !JSON.stringify(submitJson).includes(seed));
 
 console.log(`\n${failures === 0 ? 'TRADE FLOW OK' : failures + ' CHECK(S) FAILED'}`);
+await cleanupWallet();
 process.exit(failures === 0 ? 0 : 1);

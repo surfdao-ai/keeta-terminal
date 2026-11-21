@@ -168,5 +168,15 @@ const after = await (await browserA.req('/api/automations')).json();
 const seeded = JSON.stringify(after).includes(walletA.seed);
 check('the server did not store the seed it was sent', !seeded);
 
+// Self-cleanup: the throwaway wallets leave no rows behind.
+for (const [browser, wallet] of [[browserA, walletA], [browserB, walletB]]) {
+  try {
+    const r = await browser.req('/api/wallet', { method: 'POST', json: { action: 'delete' } });
+    if (r.ok) console.log(`cleaned up ${wallet.address.slice(0, 20)}…`);
+  } catch {
+    /* the wallet was disposable; a failed cleanup is not a test failure */
+  }
+}
+
 console.log(`\n${failures === 0 ? 'ALL SECURITY CHECKS PASSED' : failures + ' CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

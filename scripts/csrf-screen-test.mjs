@@ -266,6 +266,22 @@ if (read) {
  * The rule
  * ------------------------------------------------------------------ */
 
+// Self-cleanup: the throwaway wallet leaves no rows behind.
+try {
+  const cr = await realFetch(`${BASE}/api/wallet`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-kt-csrf': globalThis.document.cookie.match(/(?:^|;\s*)kt_csrf=([^;]+)/)?.[1] ?? '',
+      cookie: globalThis.document.cookie,
+    },
+    body: JSON.stringify({ action: 'delete' }),
+  });
+  if (cr.ok) console.log(`cleaned up ${signedIn.slice(0, 20)}…`);
+} catch {
+  /* the wallet was disposable; a failed cleanup is not a test failure */
+}
+
 console.log('\n-- every mutating request --');
 const mutating = requests.filter((r) => r.method !== 'GET');
 for (const r of mutating) {
