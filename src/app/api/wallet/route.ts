@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { guardRead, guardWrite, ownerOf } from '@/lib/auth/guard';
-import { getWallet, registerWallet } from '@/lib/keeta/wallet';
+import { deleteWalletData, forgetWallet, getWallet, registerWallet } from '@/lib/keeta/wallet';
 
 /**
  * The wallet registry for the signed-in visitor.
@@ -24,12 +24,27 @@ export async function POST(req: Request) {
   if (error) return error;
 
   const body = (await req.json().catch(() => ({}))) as { action?: string; address?: string };
+  const owner = ownerOf(session);
+
+  if (body.action === 'delete') {
+    // Deleting the wallet deletes everything the server stores for it:
+    // chats, trades, settings, cap, automations, watchlist, registry. The
+    // browser clears the sealed vault (and only it holds the seed).
+    try {
+      await deleteWalletData(owner);
+      await forgetWallet(owner);
+      return NextResponse.json({ ok: true });
+    } catch (e) {
+      return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+    }
+  }
+
   if (body.action !== 'register') {
     return NextResponse.json({ error: 'unknown action' }, { status: 400 });
   }
 
   try {
-    const wallet = await registerWallet(ownerOf(session), String(body.address ?? ''));
+    const wallet = await registerWallet(owner, String(body.address ?? ''));
     return NextResponse.json({ ok: true, wallet });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });

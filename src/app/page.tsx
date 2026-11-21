@@ -239,10 +239,9 @@ export default function Home() {
       const rec = readVault();
       if (!rec?.address) return;
       try {
-        const r = await fetch('/api/wallet', {
+        const r = await apiFetch('/api/wallet', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'register', address: rec.address }),
+          json: { action: 'register', address: rec.address },
         });
         if (!r.ok || cancelled) return;
         const j = await r.json();
@@ -262,7 +261,7 @@ export default function Home() {
       const list = await loadChats();
       if (cancelled) return;
       if (list.length) {
-        const r = await fetch(`/api/chats?id=${encodeURIComponent(list[0].id)}`);
+        const r = await apiFetch(`/api/chats?id=${encodeURIComponent(list[0].id)}`);
         const j = await r.json();
         if (cancelled) return;
         setActiveChatId(list[0].id);

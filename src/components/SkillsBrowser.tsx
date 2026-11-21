@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { apiFetch } from '@/lib/client/api';
 
 interface Skill {
   id: string;
@@ -18,7 +19,7 @@ export default function SkillsBrowser() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch('/api/skills');
+      const r = await apiFetch('/api/skills');
       const j = await r.json();
       setSkills(j.skills ?? []);
       if (j.error) setErr(j.error);
@@ -51,10 +52,9 @@ export default function SkillsBrowser() {
   async function openSkill(id: string) {
     setBusy(true);
     try {
-      const r = await fetch('/api/skills', {
+      const r = await apiFetch('/api/skills', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id }),
+        json: { id },
       });
       const j = await r.json();
       setOpen({ id, content: j.content ?? j.error ?? '(empty)' });

@@ -14,6 +14,14 @@ function csrfToken(): string {
   return match ? decodeURIComponent(match[1]) : '';
 }
 
+/**
+ * The CSRF token, for callers that build their own request (the AI SDK's
+ * chat transport, for one).
+ */
+export function csrfHeader(): Record<string, string> {
+  return { 'x-kt-csrf': csrfToken() };
+}
+
 export async function apiFetch(
   path: string,
   init: RequestInit & { json?: unknown } = {},

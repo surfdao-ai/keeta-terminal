@@ -50,3 +50,30 @@ export async function registerWallet(owner: string, address: string): Promise<St
 export async function forgetWallet(owner: string): Promise<void> {
   await dbWrite(KEY, null, owner);
 }
+
+/**
+ * Everything the server stores for this wallet.
+ *
+ * Deleting a wallet is deleting the address: every record below belongs to
+ * it and nothing the server knows about the user survives. The seed is not
+ * in this list on purpose — it never reaches the server; the device vault is
+ * cleared by the browser.
+ */
+export const WALLET_DATA_KEYS = [
+  'wallet',
+  'chats',
+  'settings',
+  'trades',
+  'pendingTrades',
+  'automations',
+  'automationLog',
+  'automationWallet',
+  'watchlist',
+] as const;
+
+/** Remove all of the server's records for this wallet. */
+export async function deleteWalletData(owner: string): Promise<void> {
+  for (const key of WALLET_DATA_KEYS) {
+    await dbWrite(key, null, owner);
+  }
+}

@@ -12,7 +12,9 @@
     "test:trade": "node scripts/trade-test.mjs",
     "test:wallet": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/wallet-flow-test.mjs",
     "test:screen": "tsx scripts/signin-screen-test.mjs",
-    "smoke": "bash scripts/smoke.sh"
+    "smoke": "bash scripts/smoke.sh",
+    "test:delete": "tsx scripts/delete-wallet-test.mjs",
+    "test:csrf": "tsx scripts/csrf-screen-test.mjs"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.143",

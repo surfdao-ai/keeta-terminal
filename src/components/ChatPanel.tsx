@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import ToolCard from '@/components/ToolCard';
+import { apiFetch, csrfHeader } from '@/lib/client/api';
 import type { TradeIntent } from '@/lib/keeta/trade-types';
 
 export interface PanelProviderConfig {
@@ -49,6 +50,8 @@ export default function ChatPanel({
 
   const transport = new DefaultChatTransport({
     api: '/api/chat',
+    // Every mutating request has to echo the session's CSRF token.
+    headers: () => csrfHeader(),
     prepareSendMessagesRequest: ({ messages }) => ({
       body: {
         messages,
@@ -61,10 +64,9 @@ export default function ChatPanel({
     transport,
     messages: initialMessages,
     onFinish: ({ messages: finished }) => {
-      fetch('/api/chats', {
+      apiFetch('/api/chats', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: chatId, messages: finished }),
+        json: { id: chatId, messages: finished },
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => {
@@ -75,7 +77,8 @@ export default function ChatPanel({
   });
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    const el = scrollRef.current;
+    el?.scrollTo?.({ top: el.scrollHeight, behavior: 'smooth' });
   }, [messages, status]);
 
   const loading = status === 'streaming' || status === 'submitted';

@@ -131,7 +131,7 @@ export default function Automations({
     setWallet(j.wallet ?? { address: null });
     setMinEvery(j.minEveryMinutes ?? 15);
 
-    const w = await fetch('/api/watchlist');
+    const w = await apiFetch('/api/watchlist');
     if (w.ok) {
       const wj = await w.json();
       setWatch(wj.watchlist ?? []);

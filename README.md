@@ -70,7 +70,7 @@ npm run dev
 
 ## Tests
 
-Five scripts drive the app the way a browser would — they sign in with a
+Seven scripts drive the app the way a browser would — they sign in with a
 wallet key they keep to themselves and never put a seed on the wire:
 
 ```bash
@@ -79,6 +79,8 @@ BASE=http://localhost:3111 npm run test:security
 BASE=http://localhost:3111 npm run test:trade
 BASE=http://localhost:3111 npm run test:wallet
 BASE=http://localhost:3111 npm run test:screen
+BASE=http://localhost:3111 npm run test:csrf
+BASE=http://localhost:3111 npm run test:delete
 npm run test:vault
 ```
 
@@ -97,6 +99,18 @@ the real server, with the browser bits (localStorage, cookies) simulated.
 `test:screen` renders the sign-in screen in a DOM and clicks through it: create
 a wallet, write the seed down, sign in, come back later and unlock, and try the
 wrong passphrase. It is the test that catches a broken step in the flow.
+
+`test:csrf` drives the real screens — sign in, then prompt the terminal, save
+the chat, open a skill — and checks that every mutating request that leaves the
+browser carries the session's CSRF token. It is the regression for the
+"CSRF check failed" prompts: the AI SDK's chat transport builds its own
+request and had to be taught to send the header too.
+
+`test:delete` walks the delete-wallet flow end to end: save a chat and raise
+the cap, delete the wallet from the Wallet panel, and check that the sealed
+vault is wiped from the device, the server no longer knows the address, the
+cap reverts to the default, the chat is gone, and a delete without the CSRF
+token is refused.
 
 `test:vault` exercises the vault on its own: seal, store, open, and the
 failure modes (wrong passphrase, tampered ciphertext, short passphrase).
