@@ -163,9 +163,11 @@ recurring  a DCA: swap X -> Y every N minutes — proposes, you approve`}</pre>
           to it too.
         </p>
         <p className="text-amber-300/80">
-          Keeta-native liquidity is thin. A recurring swap only fills when a provider issues a{' '}
-          <span className="text-zinc-300">binding</span> quote at that moment — otherwise the run is
-          recorded as &quot;no binding quotes&quot; and nothing is traded. Ask{' '}
+          Keeta-native liquidity is thin. A recurring swap proposes on schedule and{' '}
+          <span className="text-zinc-300">fills only when you sign it and a provider is quoting at
+          that moment</span> — the terminal routes the fill to the best quote (the base anchor is the
+          reliable one while on-chain liquidity is thin). If no provider is quoting when you sign, it
+          shows the estimate and nothing is traded. Ask{' '}
           <span className="text-zinc-300">liquidity KTA USDC</span> to see the current state.
         </p>
       </>
@@ -246,7 +248,11 @@ ks_get_providers    ks_get_fx_reference  ks_get_stablecoins ...`}</pre>
       <pre>{`"sign in required"       your session expired or was never created
 "CSRF check failed"      the browser could not echo the session token
 "wallet locked"          the seed is not in memory — unlock it
-"no binding quotes"     no provider is quoting that pair right now
+"no live liquidity"    no provider is quoting that pair right now — the
+                      estimate is shown and no trade is proposed; retry later
+route: base anchor     the swap settles via Keeta's base anchor (the reliable
+                      fill while on-chain liquidity is thin)
+route: on-chain        the swap settles on a native Keeta provider
 "wrong passphrase"      the vault passphrase, not your seed
 nothing happens         the model is not configured — open Model setup
 no balances             the wallet is new — fund it from another wallet`}</pre>

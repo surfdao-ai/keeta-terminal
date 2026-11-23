@@ -70,18 +70,20 @@ npm run dev
 
 ## Tests
 
-Seven scripts drive the app the way a browser would — they sign in with a
+Nine scripts drive the app the way a browser would — they sign in with a
 wallet key they keep to themselves and never put a seed on the wire:
 
 ```bash
 npm run build && npx next start -p 3111
 BASE=http://localhost:3111 npm run test:security
 BASE=http://localhost:3111 npm run test:trade
+BASE=http://localhost:3111 npm run test:route
 BASE=http://localhost:3111 npm run test:wallet
 BASE=http://localhost:3111 npm run test:screen
 BASE=http://localhost:3111 npm run test:csrf
 BASE=http://localhost:3111 npm run test:delete
 npm run test:vault
+npm run test:card
 ```
 
 `test:security` checks that every protected route answers 401 without a
@@ -92,6 +94,15 @@ stored.
 `test:trade` walks the whole trade: the agent proposes it, the server
 prepares a binding quote (without a key), the browser signs the swap block, and
 the server forwards only the signed block to the FX provider.
+
+`test:route` checks the routing policy: the quote picker (best outcome,
+on-chain within tolerance as the tie-break — unit-tested without a network),
+that a live fill names its route ("base anchor" / "on-chain"), and that a pair
+with no live liquidity answers gracefully with the estimate instead of a hard
+error.
+
+`test:card` renders the portfolio and positions cards with fixture data and
+checks the numbers a person would read are on screen.
 
 `test:wallet` walks the wallet flow — create, import, unlock, sign in — against
 the real server, with the browser bits (localStorage, cookies) simulated.

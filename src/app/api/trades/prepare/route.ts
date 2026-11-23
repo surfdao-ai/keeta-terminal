@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { guardWrite, ownerOf } from '@/lib/auth/guard';
-import { buildSwapIntent } from '@/lib/keeta/trade-intent';
+import { buildSwapIntent, NoLiquidityError } from '@/lib/keeta/trade-intent';
 
 /**
  * Prepare a proposed trade for signing.
@@ -21,6 +21,14 @@ export async function POST(req: Request) {
     const { intent } = await buildSwapIntent(ownerOf(session), body.tradeId);
     return NextResponse.json({ ok: true, intent });
   } catch (e) {
+    // A thin-liquidity market is not an error the user can fix — report it as
+    // a state with the estimate, so the UI and the agent can say "try later".
+    if (e instanceof NoLiquidityError) {
+      return NextResponse.json(
+        { ok: false, noLiquidity: true, error: e.message, estimateUsd: e.estimateUsd },
+        { status: 200 },
+      );
+    }
     return NextResponse.json({ error: (e as Error).message }, { status: 409 });
   }
 }

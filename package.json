@@ -14,7 +14,9 @@
     "test:screen": "tsx scripts/signin-screen-test.mjs",
     "smoke": "bash scripts/smoke.sh",
     "test:delete": "tsx scripts/delete-wallet-test.mjs",
-    "test:csrf": "tsx scripts/csrf-screen-test.mjs"
+    "test:csrf": "tsx scripts/csrf-screen-test.mjs",
+    "test:route": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/route-test.mjs",
+    "test:card": "tsx scripts/card-test.mjs"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.143",

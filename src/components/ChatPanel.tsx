@@ -134,7 +134,7 @@ export default function ChatPanel({
             </div>
           </div>
         ) : (
-          <div className="max-w-4xl mx-auto px-3 sm:px-5 py-4 sm:py-6">
+          <div className="max-w-5xl mx-auto px-3 sm:px-5 py-4 sm:py-6">
             <div className="bg-[#0d0d10] border border-zinc-800 rounded-lg overflow-hidden shadow-[0_0_60px_-20px_rgba(76,29,149,0.5)]">
               <div className="p-4 font-mono text-[13px] leading-relaxed">
                 {messages.map((m) => (
@@ -216,7 +216,9 @@ export default function ChatPanel({
                       <div>send&nbsp;&nbsp;{tradeIntent.summary.amount} {tradeIntent.summary.from}</div>
                       <div>recv&nbsp;&nbsp;{tradeIntent.summary.receive} {tradeIntent.summary.to}</div>
                       <div className="text-zinc-500">
-                        provider {tradeIntent.summary.provider} · fee ~${tradeIntent.summary.costUsd.toFixed(2)}
+                        route&nbsp;&nbsp;
+                        <span className="text-purple-300">{tradeIntent.summary.route ?? 'on-chain'}</span>
+                        {' · '}fee ~${tradeIntent.summary.costUsd.toFixed(2)}
                       </div>
                     </div>
                     <p className="text-[11px] text-zinc-500 mt-2">
@@ -246,7 +248,7 @@ export default function ChatPanel({
       </div>
 
       <div className="border-t border-zinc-800/80 p-3 sm:p-4 bg-[#09090B] pb-[calc(0.75rem+env(safe-area-inset-bottom,0px)+var(--kb,0px))] sm:pb-[calc(1rem+env(safe-area-inset-bottom,0px)+var(--kb,0px))]">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -254,9 +256,9 @@ export default function ChatPanel({
               sendMessage({ text: input });
               setInput('');
             }}
-            className="flex gap-2 items-end bg-[#0d0d10] border border-zinc-800 rounded-lg px-4 py-3 focus-within:border-purple-600 transition font-mono"
+            className="flex gap-3 items-end bg-[#0d0d10] border border-zinc-700 focus-within:border-purple-500 focus-within:shadow-[0_0_0_3px_rgba(124,58,237,0.15)] rounded-xl px-4 py-3.5 transition font-mono"
           >
-            <span className="text-purple-400 select-none leading-6">&gt;</span>
+            <span className="text-purple-400 select-none leading-7 text-lg">&gt;</span>
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -269,14 +271,14 @@ export default function ChatPanel({
                   }
                 }
               }}
-              placeholder="Ask anything..."
+              placeholder="ask, quote, or propose a trade…"
               rows={1}
-              className="flex-1 bg-transparent resize-none outline-none text-[13px] text-[#F7F7F7] placeholder-zinc-600 max-h-40"
+              className="flex-1 bg-transparent resize-none outline-none text-[15px] text-[#F7F7F7] placeholder-zinc-500 max-h-40"
             />
             <button
               type="submit"
               disabled={loading || !input.trim()}
-              className="px-3 py-1.5 rounded bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-[12px] font-medium text-white shrink-0"
+              className="px-4 py-2 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-[13px] font-medium text-white shrink-0"
             >
               send
             </button>

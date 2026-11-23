@@ -5,7 +5,7 @@
  * the types), so they need the same `@/...` -> `src/...` mapping the bundler
  * does. Loaded with: node --import ./scripts/alias-register.mjs
  */
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -25,9 +25,19 @@ function resolveFile(base) {
 }
 
 export async function resolve(specifier, context, nextResolve) {
+  // The `@/` alias -> src/.
   if (specifier.startsWith('@/')) {
     const file = resolveFile(path.join(SRC, specifier.slice(2)));
     if (file) return nextResolve(pathToFileURL(file).href, context);
+    return nextResolve(specifier, context);
+  }
+  // Relative imports without an extension (the app's own style): try .ts/.tsx.
+  if ((specifier.startsWith('./') || specifier.startsWith('../')) && context.parentURL) {
+    const base = new URL(specifier, context.parentURL);
+    if (base.protocol === 'file:') {
+      const file = resolveFile(fileURLToPath(base));
+      if (file) return nextResolve(pathToFileURL(file).href, context);
+    }
   }
   return nextResolve(specifier, context);
 }

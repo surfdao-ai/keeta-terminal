@@ -221,5 +221,18 @@ await waitFor(() => text().toLowerCase().includes('decrypt') || Boolean(signedIn
 check('it refuses the wrong passphrase', signedIn === null);
 check('it says why, in words', text().includes('does not open this wallet'), text().slice(-140).replace(/\s+/g, ' '));
 
+// Self-cleanup: the throwaway wallet leaves no rows behind.
+try {
+  const csrf = globalThis.document.cookie.match(/(?:^|;\s*)kt_csrf=([^;]+)/)?.[1] ?? '';
+  const cr = await fetch('/api/wallet', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-kt-csrf': csrf },
+    body: JSON.stringify({ action: 'delete' }),
+  });
+  if (cr.ok) console.log(`cleaned up ${vaultAddress.slice(0, 20)}…`);
+} catch {
+  /* the wallet was disposable; a failed cleanup is not a test failure */
+}
+
 console.log(`\n${failures === 0 ? 'ALL SIGN-IN SCREEN CHECKS PASSED' : failures + ' CHECK(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

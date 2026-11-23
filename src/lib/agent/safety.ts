@@ -75,6 +75,8 @@ export interface TradeRecord {
   affinity: 'from' | 'to';
   convertedAmount: string;
   provider: string;
+  /** Where the swap settled, in words: "base anchor" or "on-chain". */
+  route?: string;
   exchangeId: string | null;
   createdAt: string;
   status: 'executed' | 'pending' | 'failed';

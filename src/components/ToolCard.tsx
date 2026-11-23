@@ -12,6 +12,7 @@ interface ToolCardProps {
 
 const PRETTY: Record<string, string> = {
   get_portfolio: 'portfolio',
+  get_positions: 'positions',
   list_tokens: 'tokens',
   get_token_info: 'token',
   get_estimate: 'estimate',
@@ -22,6 +23,95 @@ const PRETTY: Record<string, string> = {
   get_trade_history: 'history',
   get_cap_status: 'cap',
 };
+
+const usd = (n: number | null | undefined, digits = 2): string =>
+  n === null || n === undefined ? '—' : `$${n.toFixed(digits)}`;
+
+/** Portfolio card: what you hold. */
+function PortfolioCard({ output }: { output: Record<string, unknown> }) {
+  const balances = (output.balances as { token?: string; display?: string }[] | undefined) ?? [];
+  const address = typeof output.address === 'string' ? output.address : '';
+  const short = (t: string) => (t.length > 14 ? `${t.slice(0, 8)}…${t.slice(-4)}` : t);
+  return (
+    <div className="font-mono text-[12px] space-y-0.5">
+      {address && (
+        <div className="text-zinc-600">
+          {address.slice(0, 14)}… · {balances.length} token{balances.length === 1 ? '' : 's'}
+        </div>
+      )}
+      {balances.length === 0 && <div className="text-zinc-500">no balances</div>}
+      {balances.map((b, i) => (
+        <div key={i} className="flex justify-between gap-3">
+          <span className="text-zinc-500 truncate">{short(b.token ?? '')}</span>
+          <span className="text-zinc-100">{b.display}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Positions card: value, cost basis and PnL, with a totals strip. */
+function PositionsCard({ output }: { output: Record<string, unknown> }) {
+  const rows = (output.positions as {
+    token?: string;
+    amount?: string;
+    valueUsd?: number | null;
+    costUsd?: number | null;
+    pnlUsd?: number | null;
+  }[] | undefined) ?? [];
+  const totalValue = output.totalValueUsd as number | null | undefined;
+  const totalCost = output.totalCostUsd as number | null | undefined;
+  const totalPnl = output.totalPnlUsd as number | null | undefined;
+  const realised = output.realisedPnlUsd as number | null | undefined;
+  const trades = output.trades as number | null | undefined;
+  const short = (t: string) => (t.length > 14 ? `${t.slice(0, 8)}…${t.slice(-4)}` : t);
+  const pnlClass = (n: number | null | undefined) =>
+    n === null || n === undefined ? 'text-zinc-600' : n >= 0 ? 'text-emerald-400' : 'text-red-400';
+  return (
+    <div className="font-mono text-[12px]">
+      {rows.length === 0 && <div className="text-zinc-500">no positions yet</div>}
+      <div className="space-y-0.5">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-baseline gap-3">
+            <span className="text-zinc-500 w-24 truncate">{short(r.token ?? '')}</span>
+            <span className="text-zinc-300 w-28 truncate">{r.amount}</span>
+            <span className="text-zinc-200 ml-auto">{usd(r.valueUsd)}</span>
+            <span className={`w-24 text-right ${pnlClass(r.pnlUsd)}`}>
+              {r.pnlUsd === null || r.pnlUsd === undefined
+                ? '—'
+                : `${r.pnlUsd >= 0 ? '+' : ''}${usd(r.pnlUsd)}`}
+            </span>
+          </div>
+        ))}
+      </div>
+      {rows.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-zinc-800 space-y-0.5 text-zinc-400">
+          <div className="flex justify-between">
+            <span>value</span>
+            <span className="text-emerald-300">{usd(totalValue)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>cost basis</span>
+            <span>{usd(totalCost)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>unrealised</span>
+            <span className={pnlClass(totalPnl)}>{totalPnl === null || totalPnl === undefined ? '—' : `${totalPnl >= 0 ? '+' : ''}${usd(totalPnl)}`}</span>
+          </div>
+          <div className="flex justify-between text-zinc-600">
+            <span>realised · {trades ?? 0} trades</span>
+            <span>{realised === null || realised === undefined ? '—' : `${realised >= 0 ? '+' : ''}${usd(realised)}`}</span>
+          </div>
+        </div>
+      )}
+      {Boolean(output.noBasis) && (
+        <div className="mt-1 text-[10px] text-zinc-600">
+          no cost basis for some tokens — funded from another wallet
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Render a value as aligned terminal rows. */
 function Rows({ data, prefix = '' }: { data: Record<string, unknown>; prefix?: string }) {
@@ -126,8 +216,44 @@ export default function ToolCard({ name, state, input, output, onConfirm }: Tool
         </span>
       </div>
 
-      {/* result — one line, raw payload behind a toggle */}
-      {summary && (
+      {/* result — one line, or a rich card for portfolio/positions, raw behind a toggle */}
+      {name === 'get_portfolio' && !running && (
+        <div className="ml-4 pl-3 border-l border-zinc-800">
+          <PortfolioCard output={output as Record<string, unknown>} />
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              onClick={() => setShowRaw((v) => !v)}
+              className="text-[10px] text-zinc-600 hover:text-zinc-400"
+            >
+              {showRaw ? 'hide raw' : 'raw'}
+            </button>
+          </div>
+          {showRaw && (
+            <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[11px] text-zinc-500">
+              {JSON.stringify(output, null, 1)}
+            </pre>
+          )}
+        </div>
+      )}
+      {name === 'get_positions' && !running && (
+        <div className="ml-4 pl-3 border-l border-zinc-800">
+          <PositionsCard output={output as Record<string, unknown>} />
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              onClick={() => setShowRaw((v) => !v)}
+              className="text-[10px] text-zinc-600 hover:text-zinc-400"
+            >
+              {showRaw ? 'hide raw' : 'raw'}
+            </button>
+          </div>
+          {showRaw && (
+            <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[11px] text-zinc-500">
+              {JSON.stringify(output, null, 1)}
+            </pre>
+          )}
+        </div>
+      )}
+      {summary && name !== 'get_portfolio' && name !== 'get_positions' && (
         <div className="ml-4 pl-3 border-l border-zinc-800 text-zinc-400">
           <div className="flex items-start gap-2">
             <span className="break-words">{summary}</span>

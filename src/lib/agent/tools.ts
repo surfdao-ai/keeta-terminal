@@ -2,8 +2,10 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { networkAlias, userClient, loadFXClient, toDisplay, fromDisplay, getTokenInfo, summarizeQuote, normalizeToken } from '../keeta/network';
 import { readPublicBalances } from '../keeta/public-reads';
+import { computePositions } from '../keeta/positions';
 import { ephemeralAccount } from '../keeta/ephemeral';
 import { tokenDecimals } from '../keeta/currencies';
+import { routeKind, routeLabel } from '../keeta/routes';
 import { newPendingTrade, savePending, listTrades, capSpent, dailyCapUsd } from './safety';
 import { validateTokenSpec } from '../keeta/tokens';
 
@@ -26,6 +28,30 @@ export function buildTools(ctx: ToolContext) {
           network: networkAlias(),
           balances: rows ?? [],
           note: rows === null ? 'Could not read the balances right now.' : undefined,
+        };
+      },
+    }),
+
+    get_positions: tool({
+      description:
+        'Get the wallet positions with USD value, cost basis and PnL (unrealised and realised). Use when the user asks for PnL, profit, loss, or "how am I doing". Requires an unlocked wallet.',
+      inputSchema: z.object({}),
+      execute: async () => {
+        const p = await computePositions(ctx.owner, ctx.address);
+        return {
+          positions: p.positions.map((x) => ({
+            token: x.token,
+            amount: x.amount,
+            valueUsd: x.valueUsd,
+            costUsd: x.costUsd,
+            pnlUsd: x.pnlUsd,
+          })),
+          totalValueUsd: p.totalValueUsd,
+          totalCostUsd: p.totalCostUsd,
+          totalPnlUsd: p.totalPnlUsd,
+          realisedPnlUsd: p.realisedPnlUsd,
+          trades: p.trades,
+          noBasis: p.unpriced.length > 0,
         };
       },
     }),
@@ -114,6 +140,7 @@ export function buildTools(ctx: ToolContext) {
             );
             return {
               providerId: String((p as { provider?: { providerID?: unknown } }).provider?.providerID ?? 'unknown'),
+              route: routeLabel(routeKind(String((p as { provider?: { providerID?: unknown } }).provider?.providerID ?? ''))),
               isBindingQuote: isQuote,
               ...summary,
             };
@@ -157,6 +184,7 @@ export function buildTools(ctx: ToolContext) {
           bindingQuote: binding
             ? {
                 provider: String((binding as { provider?: { providerID?: unknown } })?.provider?.providerID ?? 'unknown'),
+                route: routeLabel(routeKind(String((binding as { provider?: { providerID?: unknown } })?.provider?.providerID ?? ''))),
                 convertedAmount: binding.quote?.convertedAmount?.toString() ?? null,
                 display: toDisplay(binding.quote?.convertedAmount ?? 0n, toDecimals),
               }
@@ -169,11 +197,15 @@ export function buildTools(ctx: ToolContext) {
                 canPerformExchange: estimate.estimate?.canPerformExchange ?? null,
               }
             : null,
-          // Keeta-native liquidity is thin; the practical route is usually the
-          // Base anchor (bridge the asset on Base, then swap on Keeta).
+          // Keeta-native liquidity is thin; when a provider does quote it is
+          // usually the base anchor. The picker routes by best outcome, so the
+          // pair fills whenever any provider is live — otherwise report the
+          // estimate and that it is retryable, not a failure.
           note: tradable
-            ? 'A provider is quoting this pair — a trade can be proposed.'
-            : 'No provider is issuing a binding quote for this pair right now. Keeta-native liquidity is thin; the practical route is to hold the asset on Base (the Base anchor, e.g. USDC on Base) and bridge it in. Do not propose a trade that cannot fill.',
+            ? `A provider is quoting this pair via the ${routeLabel(routeKind(String((binding as { provider?: { providerID?: unknown } })?.provider?.providerID ?? '')))} — a trade can be proposed.`
+            : estimate
+              ? `No live liquidity for this pair right now. Estimate: ${toDisplay(estimate.estimate?.convertedAmount ?? 0n, toDecimals)} — not executable yet, try again later. Do not propose a trade that cannot fill.`
+              : 'No provider is issuing a binding quote for this pair right now, and no estimate is available. Do not propose a trade that cannot fill.',
         };
       },
     }),

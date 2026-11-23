@@ -12,6 +12,8 @@ import { loadFXClient, userClient, toDisplay, fromDisplay } from './network';
 import { tokenDecimals, tokenSymbol, resolveTokenAddress } from './currencies';
 import { loadPending, capSpent, dailyCapUsd, appendTrade, removePending, type PendingTrade } from '../agent/safety';
 import { ephemeralAccount } from './ephemeral';
+import { pickBestQuoteIndex } from './quote-routing';
+import { routeKind, routeLabel } from './routes';
 import type { TradeIntent } from './trade-types';
 
 export type { TradeIntent, TradeSummary } from './trade-types';
@@ -22,6 +24,22 @@ interface ProviderShape {
   /** The provider's operations: each is a getter that yields the URL builder. */
   serviceInfo?: { operations?: Record<string, unknown> };
   quote?: unknown;
+}
+
+/**
+ * "No executable quote" is a market condition, not a crash.
+ *
+ * This error carries the estimate for the pair, so the caller (the prepare
+ * route, and the agent) can tell the user *why* the trade cannot be made and
+ * what it would be worth, instead of a bare "no provider" wall.
+ */
+export class NoLiquidityError extends Error {
+  readonly estimateUsd: number | null;
+  constructor(message: string, estimateUsd: number | null) {
+    super(message);
+    this.name = 'NoLiquidityError';
+    this.estimateUsd = estimateUsd;
+  }
 }
 
 /**
@@ -102,18 +120,63 @@ export async function buildSwapIntent(
     affinity: pending.affinity,
   } as unknown as Parameters<typeof fx.getQuotes>[0]);
 
-  const withQuote = quotes?.[0];
-  if (!withQuote) {
-    throw new Error('No provider is issuing a binding quote for this pair right now.');
+  if (!quotes || quotes.length === 0) {
+    // Thin-liquidity market state: pull the (non-binding) estimate so the user
+    // sees what the swap *would* be worth and that it is retryable — not a
+    // dead end. The estimate is in destination-token units; when the
+    // destination is a USD coin its value is the USD value too.
+    let estDisplay: string | null = null;
+    let usd: number | null = null;
+    try {
+      const res = await fx.getQuotesOrEstimates({
+        from: pending.fromToken,
+        to: pending.toToken,
+        amount: rawAmount,
+        affinity: pending.affinity,
+      } as unknown as Parameters<typeof fx.getQuotesOrEstimates>[0]);
+      const est = res?.find((r) => !r.isQuote && r.estimate) as
+        | { estimate?: { convertedAmount?: bigint } }
+        | undefined;
+      const converted = est?.estimate?.convertedAmount;
+      if (converted !== undefined) {
+        estDisplay = toDisplay(converted, toDecimals);
+        if (/USD/i.test(await tokenSymbol(pending.toToken))) {
+          usd = Number(estDisplay);
+        }
+      }
+    } catch {
+      /* no estimate either — still report the state */
+    }
+
+    const fromSymbol = await tokenSymbol(pending.fromToken);
+    const toSymbol = await tokenSymbol(pending.toToken);
+    const what =
+      estDisplay !== null
+        ? ` · est ${pending.amount} ${fromSymbol} ≈ ${estDisplay} ${toSymbol}`
+        : '';
+    throw new NoLiquidityError(
+      `No live liquidity for ${fromSymbol}→${toSymbol} right now${what} (not executable — try later).`,
+      usd,
+    );
   }
 
+  // kterminal picks its own route: best outcome, on-chain as the tie-break.
+  const chosen = pickBestQuoteIndex(
+    quotes.map((q) => ({
+      providerId: String((q.provider as { providerID?: unknown })?.providerID ?? ''),
+      convertedAmount: (q.quote as { convertedAmount: bigint }).convertedAmount,
+    })),
+  );
+  const withQuote = quotes[chosen];
   const provider = withQuote.provider as unknown as ProviderShape;
+  const providerId = String(provider.providerID ?? 'unknown');
   const quote = withQuote.quote as unknown as {
     request: { from: string; to: string; amount: bigint; affinity: 'from' | 'to' };
     account: unknown;
     convertedAmount: bigint;
     cost: { amount: bigint; token: unknown };
   };
+  const route = routeLabel(routeKind(providerId));
 
   const { toJSONSerializable } = KeetaNet.lib.Utils.Conversion;
   const serializedQuote = toJSONSerializable({ quote: withQuote.quote });
@@ -152,8 +215,9 @@ export async function buildSwapIntent(
       to: await tokenSymbol(pending.toToken),
       amount: pending.amount,
       receive: convertedDisplay,
-      provider: String(provider.providerID ?? 'unknown'),
+      provider: providerId,
       costUsd,
+      route,
     },
   };
 
@@ -256,6 +320,7 @@ export async function submitSignedSwap(
     affinity: intent.affinity,
     convertedAmount: intent.summary.receive,
     provider: intent.summary.provider,
+    route: intent.summary.route,
     exchangeId,
     createdAt: new Date().toISOString(),
     status: settled ? 'executed' : pending ? 'pending' : 'failed',

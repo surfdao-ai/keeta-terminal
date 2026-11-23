@@ -13,6 +13,8 @@ export interface TradeSummary {
   receive: string;
   provider: string;
   costUsd: number;
+  /** Where the swap settles, in words: "base anchor" or "on-chain". */
+  route: string;
 }
 
 /** Everything the browser needs to build and sign the swap block. */

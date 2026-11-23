@@ -431,6 +431,14 @@ export default function Home() {
       setter(j);
       return;
     }
+    // The market has no live liquidity for the pair: no intent to sign, so
+    // report the graceful state (with the estimate) instead of a trade card.
+    if (!j.intent && j.noLiquidity) {
+      setTradeIntent(null);
+      setNotice(`${j.error ?? 'No live liquidity right now.'}`);
+      setter({ noLiquidity: true, error: j.error });
+      return;
+    }
     setTradeIntent(j.intent as TradeIntent);
   }
 
@@ -476,6 +484,10 @@ export default function Home() {
     const j = await r.json();
     if (!r.ok) {
       setNotice(`err  ${j.error}`);
+      return;
+    }
+    if (!j.intent && j.noLiquidity) {
+      setNotice(`${j.error ?? 'No live liquidity right now.'}`);
       return;
     }
     const intent = { ...(j.intent as TradeIntent), fromAutomation: true } as TradeIntent;
