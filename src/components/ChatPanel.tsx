@@ -31,12 +31,12 @@ interface ChatPanelProps {
   onConfirm: (tradeId: string, setter: (r: unknown) => void) => void;
 }
 
-/** The rotating hints that sit above the composer. */
+/** The rotating hints that sit above the composer. Kept to about one line. */
 const TIPS = [
-  'liquidity KTA USDC — is this pair tradable right now?',
-  'kterminal picks the route for you — base anchor vs on-chain, best outcome wins.',
-  'portfolio shows PnL from your own trades only — nothing is guessed.',
-  'a trade is only signed in this browser, and only after you approve it.',
+  'liquidity KTA USDC checks whether a pair is tradable right now',
+  'kterminal picks the route for you — best outcome wins',
+  'portfolio PnL comes from your own trades only',
+  'a trade is signed in this browser, only after you approve it',
 ];
 
 export default function ChatPanel({
@@ -264,18 +264,19 @@ export default function ChatPanel({
 
       <div className="border-t border-zinc-800/80 p-3 sm:p-4 bg-[#09090B] pb-[calc(0.75rem+env(safe-area-inset-bottom,0px)+var(--kb,0px))] sm:pb-[calc(1rem+env(safe-area-inset-bottom,0px)+var(--kb,0px))]">
         <div className="max-w-5xl mx-auto">
-          {/* rotating tip, bankr-style */}
-          <div className="flex items-center gap-2 mb-2 px-1">
-            <span className="shrink-0 px-2 py-0.5 rounded-full bg-purple-900/40 border border-purple-800/50 text-purple-300 text-[10px] font-medium tracking-wide">
+          {/* rotating tip, bankr-style — the text wraps to two lines so it
+              never runs off the screen on a narrow phone */}
+          <div className="flex items-start gap-2 mb-2 px-1">
+            <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded-full bg-purple-900/40 border border-purple-800/50 text-purple-300 text-[10px] font-medium tracking-wide leading-tight">
               tip
             </span>
-            <span className="flex-1 min-w-0 text-[12px] text-zinc-400 truncate">{TIPS[tip]}</span>
+            <span className="flex-1 min-w-0 text-[12px] leading-snug text-zinc-400 line-clamp-2">{TIPS[tip]}</span>
             <button
               type="button"
               onClick={() => setTip((t) => (t + 1) % TIPS.length)}
               aria-label="show another tip"
               title="another tip"
-              className="shrink-0 p-1.5 rounded-full text-zinc-600 hover:text-zinc-200 hover:bg-zinc-800/60 transition"
+              className="shrink-0 mt-0.5 p-1.5 rounded-full text-zinc-600 hover:text-zinc-200 hover:bg-zinc-800/60 transition"
             >
               <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
