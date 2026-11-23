@@ -153,7 +153,12 @@ await req('/api/auth/login', {
 });
 
 console.log('== live: a fillable pair routes ==');
-{
+// These two checks seed a pending proposal straight into the owner-scoped
+// store, which needs DATABASE_URL; without it they are skipped (the trade
+// test covers the live prepare/submit path via the agent).
+const canSeed = Boolean(process.env.DATABASE_URL);
+if (!canSeed) console.log('   (no DATABASE_URL — skipping store-seeded live checks)');
+if (canSeed) {
   const id = await seedProposal(address, '$KBUSD', '$KUSD', '1');
   const prep = await req('/api/trades/prepare', { method: 'POST', json: { tradeId: id } });
   const j = await prep.json();
@@ -166,7 +171,7 @@ console.log('== live: a fillable pair routes ==');
 }
 
 console.log('== live: a non-fillable pair is graceful ==');
-{
+if (canSeed) {
   // KTA->USDC has no executable quote (only an estimate) — the dead end.
   const id = await seedProposal(address, '$KTA', '$USDC', '1');
   const prep = await req('/api/trades/prepare', { method: 'POST', json: { tradeId: id } });

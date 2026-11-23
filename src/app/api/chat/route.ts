@@ -202,5 +202,8 @@ function friendlyModelError(error: unknown): string {
   if (/api key|unauthorized|401/i.test(blob)) {
     return 'Provider rejected the API key. Open "Model setup" and check the key.';
   }
+  if (/InvalidToolInputError|NoSuchToolError/i.test(blob)) {
+    return 'The model malformed a tool call — that is a model slip, not a kterminal fault. Send the request again.';
+  }
   return `Model request failed: ${err?.message ?? 'unknown error'}`;
 }

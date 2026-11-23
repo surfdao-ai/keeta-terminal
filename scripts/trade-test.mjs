@@ -190,14 +190,23 @@ const prepJson = await prep.json();
 check('prepare answered', prep.status === 200 || prep.status === 409, `status ${prep.status} ${prepJson.error ?? ''}`);
 
 if (!prepJson.intent) {
+  // Either the market is genuinely dry, or the new graceful no-liquidity
+  // state (with the estimate) — both mean "nothing to sign", which is
+  // exactly where the flow should stop.
+  if (prepJson.noLiquidity === true) {
+    check('no liquidity was reported gracefully', /liquidity|estimate|est /i.test(prepJson.error ?? ''), prepJson.error ?? '');
+  }
   console.log(
-    '\nno binding quote is available for this pair right now, so the trade cannot be signed —',
+    '\nno live liquidity for this pair right now, so the trade cannot be signed —',
     '\nthe flow stopped exactly where it should: before anything is signed.',
   );
   console.log(`\n${failures === 0 ? 'TRADE FLOW OK (market dry)' : failures + ' CHECK(S) FAILED'}`);
   await cleanupWallet();
   process.exit(failures === 0 ? 0 : 1);
 }
+
+// The fill names its route in words (base anchor vs on-chain).
+check('the fill names its route', prepJson.intent.summary.route === 'base anchor' || prepJson.intent.summary.route === 'on-chain', prepJson.intent.summary.route);
 
 // The browser signs the block locally.
 console.log('\n== sign in the browser ==');
