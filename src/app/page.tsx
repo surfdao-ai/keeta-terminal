@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import type { UIMessage } from 'ai';
 import PwaRegister, { type BeforeInstallPromptEvent } from '@/components/PwaRegister';
@@ -13,6 +13,7 @@ import SkillsBrowser from '@/components/SkillsBrowser';
 import Positions from '@/components/Positions';
 import { readVault } from '@/lib/vault';
 import { apiFetch } from '@/lib/client/api';
+import { latestNewAlert, type AlertLogEntry } from '@/lib/agent/alerts';
 import { signSwapBlock } from '@/lib/keeta/browser-signer';
 import type { TradeIntent } from '@/lib/keeta/trade-types';
 
@@ -77,6 +78,39 @@ function subscribeCfg(onStoreChange: () => void): () => void {
     window.removeEventListener('storage', on);
     window.removeEventListener(CFG_EVENT, on);
   };
+}
+
+/**
+ * A short two-tone chime for a fired alert. The WebAudio context is created
+ * lazily; in the PWA the app is interactive, so autoplay policy allows it.
+ * Fails silently when the context can't be created.
+ */
+let alertAudio: AudioContext | null = null;
+function alertChime() {
+  try {
+    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    alertAudio = alertAudio ?? new AC();
+    const ctx = alertAudio;
+    if (ctx.state === 'suspended') void ctx.resume();
+    const now = ctx.currentTime;
+    for (const [freq, t] of [
+      [880, 0],
+      [1174.66, 0.16],
+    ] as const) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + t);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.28);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + t);
+      osc.stop(now + t + 0.3);
+    }
+  } catch {
+    /* no audio — the banner still shows */
+  }
 }
 
 type View = 'chat' | 'wallet' | 'trade' | 'automations' | 'skills' | 'settings';
@@ -152,6 +186,10 @@ export default function Home() {
   const [capSaving, setCapSaving] = useState(false);
   const [capMsg, setCapMsg] = useState('');
   const [notice, setNotice] = useState('');
+  const [alertBanner, setAlertBanner] = useState<{ text: string; at: string } | null>(null);
+  // The newest alert-trigger we have already announced, so a page load does not
+  // chime about alerts that fired before the app was open.
+  const announcedAlertAt = useRef<string | null>(null);
   const [chats, setChats] = useState<{ id: string; title: string; updatedAt: string }[]>([]);
   const [activeChatId, setActiveChatId] = useState('');
   const [activeMessages, setActiveMessages] = useState<UIMessage[]>([]);
@@ -319,6 +357,37 @@ export default function Home() {
     const t = setInterval(tick, 60_000);
     return () => clearInterval(t);
   }, [unlock.unlocked, seed]);
+
+  // Surface a fired price alert in the main view — the only feedback the user
+  // otherwise gets is an amber line inside the Automations tab, which a closed
+  // or backgrounded app never shows. Poll the activity log for *new* triggered
+  // alerts (newer than the watermark) and raise a banner + chime.
+  useEffect(() => {
+    if (!unlock.unlocked) return;
+    let cancelled = false;
+    const checkAlerts = async () => {
+      try {
+        const r = await apiFetch('/api/automations');
+        if (!r.ok || cancelled) return;
+        const j = await r.json();
+        const log: AlertLogEntry[] = j.log ?? [];
+        const newest = latestNewAlert(log, announcedAlertAt.current);
+        if (newest) {
+          announcedAlertAt.current = newest.at;
+          setAlertBanner({ text: newest.message, at: newest.at });
+          alertChime();
+        }
+      } catch {
+        /* a failed poll must not take the app down */
+      }
+    };
+    void checkAlerts();
+    const t = setInterval(checkAlerts, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [unlock.unlocked]);
 
   useEffect(() => {
     if (!notice) return;
@@ -900,6 +969,20 @@ export default function Home() {
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg bg-[#141416] border border-zinc-700 font-mono text-[12px] text-zinc-200 shadow-xl max-w-[90vw]">
           {notice}
         </div>
+      )}
+
+      {alertBanner && (
+        <button
+          onClick={() => setAlertBanner(null)}
+          className="fixed top-[calc(var(--kt-header-h)+0.75rem)] left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-[#1c1305] border border-amber-700/70 font-mono text-[12px] text-amber-200 shadow-xl max-w-[92vw]"
+          title="tap to dismiss"
+        >
+          <span className="text-amber-400 text-[15px] leading-none">◈</span>
+          <span className="min-w-0">
+            <span className="text-amber-300/80 text-[10px] uppercase tracking-wider">price alert</span>
+            <span className="block truncate">{alertBanner.text}</span>
+          </span>
+        </button>
       )}
 
       <PwaRegister onInstallPrompt={setInstallEvent} />

@@ -17,7 +17,8 @@
     "test:csrf": "tsx scripts/csrf-screen-test.mjs",
     "test:route": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/route-test.mjs",
     "test:card": "tsx scripts/card-test.mjs",
-    "test:automations": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/automations-test.mjs"
+    "test:automations": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/automations-test.mjs",
+    "test:alerts": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/alerts-test.mjs"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.143",

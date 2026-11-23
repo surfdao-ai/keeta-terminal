@@ -70,7 +70,7 @@ npm run dev
 
 ## Tests
 
-Ten scripts drive the app the way a browser would — they sign in with a
+Eleven scripts drive the app the way a browser would — they sign in with a
 wallet key they keep to themselves and never put a seed on the wire:
 
 ```bash
@@ -83,6 +83,7 @@ BASE=http://localhost:3111 npm run test:screen
 BASE=http://localhost:3111 npm run test:csrf
 BASE=http://localhost:3111 npm run test:delete
 BASE=http://localhost:3111 npm run test:automations
+npm run test:alerts
 npm run test:vault
 npm run test:card
 ```
@@ -112,6 +113,11 @@ store — which must *propose* a pending trade that waits for the user to sign,
 never auto-execute (the key stays in the browser, and a dry pair simply stays
 pending). On a Postgres/Blob backend the force-due step is skipped and it
 instead checks a not-yet-due swap is left alone.
+
+`test:alerts` unit-tests the alert-surfacing helper — which fired alert is
+"new" relative to a watermark — so the app's banner and chime fire exactly
+once per alert, not on every poll and not for alerts that fired before the app
+opened.
 
 `test:wallet` walks the wallet flow — create, import, unlock, sign in — against
 the real server, with the browser bits (localStorage, cookies) simulated.
