@@ -31,6 +31,14 @@ interface ChatPanelProps {
   onConfirm: (tradeId: string, setter: (r: unknown) => void) => void;
 }
 
+/** The rotating hints that sit above the composer. */
+const TIPS = [
+  'liquidity KTA USDC — is this pair tradable right now?',
+  'kterminal picks the route for you — base anchor vs on-chain, best outcome wins.',
+  'portfolio shows PnL from your own trades only — nothing is guessed.',
+  'a trade is only signed in this browser, and only after you approve it.',
+];
+
 export default function ChatPanel({
   chatId,
   initialMessages,
@@ -46,6 +54,7 @@ export default function ChatPanel({
   onConfirm,
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
+  const [tip, setTip] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const transport = new DefaultChatTransport({
@@ -120,14 +129,20 @@ export default function ChatPanel({
                   docs — every command, and how the keys work →
                 </a>
               </p>
-              <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {['portfolio', 'list tokens', 'estimate 1 KTA to USDC', 'propose 0.1 KTA for USDC'].map((q) => (
+              <div className="mt-7 flex flex-wrap items-center justify-center gap-2">
+                {[
+                  { label: 'Portfolio', q: 'portfolio', icon: '◈' },
+                  { label: 'List tokens', q: 'list tokens', icon: '≡' },
+                  { label: 'Estimate 1 KTA → USDC', q: 'estimate 1 KTA to USDC', icon: '≈' },
+                  { label: 'Propose a trade', q: 'propose 0.1 KTA for USDC', icon: '⇄' },
+                ].map((s) => (
                   <button
-                    key={q}
-                    onClick={() => setInput(q)}
-                    className="font-mono text-[12px] px-4 py-2.5 rounded-lg bg-[#141416] border border-zinc-800 hover:border-purple-600 text-zinc-400 hover:text-zinc-200 text-left transition"
+                    key={s.q}
+                    onClick={() => setInput(s.q)}
+                    className="flex items-center gap-1.5 pl-3 pr-3.5 py-2 rounded-full border border-zinc-800 bg-[#141416]/80 text-[13px] text-zinc-400 hover:text-zinc-100 hover:border-zinc-600 hover:bg-[#18181b] transition"
                   >
-                    <span className="text-purple-400">&gt;</span> {q}
+                    <span className="text-zinc-500 text-[12px]">{s.icon}</span>
+                    {s.label}
                   </button>
                 ))}
               </div>
@@ -225,18 +240,18 @@ export default function ChatPanel({
                       It is signed in this browser and sent to the provider. Nothing is signed until
                       you approve.
                     </p>
-                    <div className="flex gap-2 mt-2">
+                    <div className="flex items-center gap-2 mt-3">
                       <button
                         onClick={() => onSignTrade(() => undefined)}
-                        className="px-3 py-1 font-mono text-[12px] rounded bg-[#4C1D95] hover:bg-purple-700 text-white"
+                        className="px-4 py-1.5 rounded-full bg-[#4C1D95] hover:bg-purple-700 text-[13px] font-medium text-white transition"
                       >
-                        [ sign and send ]
+                        sign and send
                       </button>
                       <button
                         onClick={onCancelTrade}
-                        className="px-3 py-1 font-mono text-[12px] rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+                        className="px-4 py-1.5 rounded-full border border-zinc-700 hover:bg-zinc-800/60 text-[13px] text-zinc-400 hover:text-zinc-200 transition"
                       >
-                        [ cancel ]
+                        cancel
                       </button>
                     </div>
                   </div>
@@ -249,6 +264,27 @@ export default function ChatPanel({
 
       <div className="border-t border-zinc-800/80 p-3 sm:p-4 bg-[#09090B] pb-[calc(0.75rem+env(safe-area-inset-bottom,0px)+var(--kb,0px))] sm:pb-[calc(1rem+env(safe-area-inset-bottom,0px)+var(--kb,0px))]">
         <div className="max-w-5xl mx-auto">
+          {/* rotating tip, bankr-style */}
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <span className="shrink-0 px-2 py-0.5 rounded-full bg-purple-900/40 border border-purple-800/50 text-purple-300 text-[10px] font-medium tracking-wide">
+              tip
+            </span>
+            <span className="flex-1 min-w-0 text-[12px] text-zinc-400 truncate">{TIPS[tip]}</span>
+            <button
+              type="button"
+              onClick={() => setTip((t) => (t + 1) % TIPS.length)}
+              aria-label="show another tip"
+              title="another tip"
+              className="shrink-0 p-1.5 rounded-full text-zinc-600 hover:text-zinc-200 hover:bg-zinc-800/60 transition"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                <path d="M21 3v5h-5" />
+                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                <path d="M3 21v-5h5" />
+              </svg>
+            </button>
+          </div>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -256,9 +292,8 @@ export default function ChatPanel({
               sendMessage({ text: input });
               setInput('');
             }}
-            className="flex gap-3 items-end bg-[#0d0d10] border border-zinc-700 focus-within:border-purple-500 focus-within:shadow-[0_0_0_3px_rgba(124,58,237,0.15)] rounded-xl px-4 py-3.5 transition font-mono"
+            className="bg-[#0d0d10] border border-zinc-800 focus-within:border-purple-500 focus-within:shadow-[0_0_0_3px_rgba(124,58,237,0.15)] rounded-2xl p-2 transition"
           >
-            <span className="text-purple-400 select-none leading-7 text-lg">&gt;</span>
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -273,21 +308,27 @@ export default function ChatPanel({
               }}
               placeholder="ask, quote, or propose a trade…"
               rows={1}
-              className="flex-1 bg-transparent resize-none outline-none text-[15px] text-[#F7F7F7] placeholder-zinc-500 max-h-40"
+              className="w-full bg-transparent resize-none outline-none text-[15px] text-[#F7F7F7] placeholder-zinc-500 px-2.5 pt-2.5 max-h-40"
             />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="px-4 py-2 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-[13px] font-medium text-white shrink-0"
-            >
-              send
-            </button>
+            <div className="flex items-center gap-2 px-1 pb-1 pt-0.5">
+              <span className="flex-1 min-w-0 pl-1.5 font-mono text-[10px] text-zinc-600 truncate">
+                {unlocked ? `wallet ${address?.slice(0, 12)}… unlocked` : 'wallet locked — unlock in sidebar to trade'}
+                {modelLabel ? ` · ${modelLabel}` : ' · no model configured'}
+                {cap ? ` · cap $${cap.spentUsd.toFixed(0)}/$${cap.capUsd.toFixed(0)}` : ''}
+              </span>
+              <button
+                type="submit"
+                disabled={loading || !input.trim()}
+                aria-label="send"
+                className="shrink-0 h-9 w-9 rounded-full bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-30 disabled:hover:bg-[#4C1D95] text-white flex items-center justify-center transition"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 19V5" />
+                  <path d="m5 12 7-7 7 7" />
+                </svg>
+              </button>
+            </div>
           </form>
-          <p className="font-mono text-[10px] text-zinc-700 mt-2 text-center">
-            {unlocked ? `wallet ${address?.slice(0, 12)}… unlocked` : 'wallet locked — unlock in sidebar to trade'}
-            {modelLabel ? ` · ${modelLabel}` : ' · no model configured'}
-            {cap ? ` · cap ${cap.spentUsd.toFixed(2)}/${cap.capUsd}` : ''}
-          </p>
         </div>
       </div>
     </>
