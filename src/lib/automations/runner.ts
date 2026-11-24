@@ -48,6 +48,14 @@ export async function runAutomations(owner?: string): Promise<RunReport> {
 
   const owners = owner ? [owner] : await listAutomationOwners();
 
+  // A run evaluates many owners' alerts against the SAME symbols. Fetching a
+  // price once per symbol per run keeps the sweep from multiplying a network
+  // call by the number of owners (at 500+ owners that difference is the
+  // function timeout). The null result is cached too: if the source is down
+  // for one owner, every other owner sees the same "no price" and we make
+  // one failing request, not five hundred.
+  const priceCache = new Map<string, number | null>();
+
   for (const owner of owners) {
     const list = await listAutomations(owner);
     const now = Date.now();
@@ -58,7 +66,16 @@ export async function runAutomations(owner?: string): Promise<RunReport> {
       report.checked++;
 
       if (a.kind === 'alert') {
-        const price = await getTokenPriceUsd(a.symbol).catch(() => null);
+        // One lookup per symbol per run — the cache holds the result, null
+        // included, so a down source costs one failing request, not one per
+        // owner.
+        let price: number | null;
+        if (priceCache.has(a.symbol)) {
+          price = priceCache.get(a.symbol) ?? null;
+        } else {
+          price = await getTokenPriceUsd(a.symbol).catch(() => null);
+          priceCache.set(a.symbol, price);
+        }
         patches.set(a.id, {
           lastCheckedAt: new Date().toISOString(),
           ...(price !== null ? { lastPriceUsd: price } : {}),

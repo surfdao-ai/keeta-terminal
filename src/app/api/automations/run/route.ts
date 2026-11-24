@@ -25,8 +25,8 @@ export async function POST(req: Request) {
     }
   }
 
-  const scope = session?.address ?? 'schedule';
-  const limit = await consumeRateLimit(`automations:${scope}`, 12, 60);
+  const limitKey = session?.address ?? 'schedule';
+  const limit = await consumeRateLimit(`automations:${limitKey}`, 12, 60);
   if (!limit.ok) {
     return NextResponse.json(
       { error: 'Too many automation runs. Try again shortly.' },
@@ -34,9 +34,11 @@ export async function POST(req: Request) {
     );
   }
 
-  // A signed-in caller only evaluates its own automations; the unauthenticated
-  // schedule sweeps everyone.
-  const report = await runAutomations(session?.address);
+  // A signed-in caller only evaluates its own automations. The schedule
+  // always sweeps everyone: it proves itself with the Bearer token, and the
+  // token — not a stray cookie — decides the scope.
+  const scope = bySchedule ? undefined : session?.address;
+  const report = await runAutomations(scope);
   console.log(
     `automations run: checked=${report.checked} triggered=${report.triggered} proposed=${report.proposed} skipped=${report.skipped}`,
   );

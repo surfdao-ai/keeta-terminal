@@ -52,6 +52,14 @@ interface KVBackend {
   write<T>(key: string, value: T, expectedRev: string | null): Promise<string | null>;
   /** Unconditional overwrite (last writer wins). */
   overwrite<T>(key: string, value: T): Promise<void>;
+  /**
+   * Enumerate stored storage keys matching a prefix and/or suffix.
+   *
+   * Optional because not every backend can discover keys: the Blob backend
+   * hashes every key into a blob path, so the original keys are not
+   * recoverable — it omits the method and callers must have a fallback.
+   */
+  listKeys?(match: { prefix?: string; suffix?: string }): Promise<string[]>;
 }
 
 /**
@@ -99,6 +107,16 @@ const fileDB: KVBackend = {
   },
   async overwrite<T>(key: string, value: T) {
     await writeFileKey(key, value);
+  },
+  async listKeys(match: { prefix?: string; suffix?: string }) {
+    try {
+      const parsed = JSON.parse(await fs.readFile(DATA_FILE, 'utf8')) as KV;
+      return Object.keys(parsed).filter(
+        (k) => (!match.prefix || k.startsWith(match.prefix)) && (!match.suffix || k.endsWith(match.suffix)),
+      );
+    } catch {
+      return [];
+    }
   },
 };
 
@@ -166,6 +184,16 @@ async function getPostgres(): Promise<PgDB> {
           await sql`INSERT INTO kt_store (key, value, rev) VALUES (${key}, ${sql.json(
             value as object,
           )}, 1) ON CONFLICT (key) DO UPDATE SET value = excluded.value, rev = kt_store.rev + 1, updated = now()`;
+        },
+        async listKeys(match: { prefix?: string; suffix?: string }) {
+          // Keys are `u:<address>:<key>` (addresses are keeta_[a-z0-9]), so the
+          // fragments carry no LIKE wildcards.
+          const like =
+            (match.prefix ? match.prefix : '') + '%' + (match.suffix ? match.suffix : '');
+          const rows = (await sql`SELECT key FROM kt_store WHERE key LIKE ${like}`) as unknown as {
+            key: string;
+          }[];
+          return rows.map((r) => r.key);
         },
       };
     })();
@@ -390,6 +418,17 @@ export function scopedKey(owner: string, key: string): string {
 export async function dbRead<T = unknown>(key: string, owner?: string): Promise<T | null> {
   const db = await backend();
   return (await db.read<T>(owner ? scopedKey(owner, key) : key)).value;
+}
+
+/**
+ * The storage keys matching a prefix and/or suffix, when the backend can
+ * enumerate keys (Postgres, file). Returns null on backends that cannot
+ * (Blob: keys are hashed into blob paths, so they are not discoverable) —
+ * callers need a fallback for those.
+ */
+export async function dbListKeys(match: { prefix?: string; suffix?: string }): Promise<string[] | null> {
+  const db = await backend();
+  return db.listKeys ? db.listKeys(match) : null;
 }
 
 export async function dbWrite(key: string, value: unknown, owner?: string): Promise<void> {

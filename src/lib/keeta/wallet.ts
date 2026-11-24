@@ -6,6 +6,7 @@
  * the browser (src/lib/vault.ts).
  */
 import { dbRead, dbWrite } from '../db';
+import { forgetAutomationOwner } from '../automations/store';
 
 export interface StoredWallet {
   address: string;
@@ -76,4 +77,8 @@ export async function deleteWalletData(owner: string): Promise<void> {
   for (const key of WALLET_DATA_KEYS) {
     await dbWrite(key, null, owner);
   }
+  // The automations owner index is a global row (not owner-scoped), so it
+  // must be cleaned up explicitly — otherwise the dead address lingers in the
+  // scheduler's fallback list.
+  await forgetAutomationOwner(owner).catch(() => undefined);
 }

@@ -9,7 +9,7 @@
  * encrypted with a server-side key (AUTOMATION_KEY). The user funds that
  * wallet, so the blast radius of an automation is bounded by its balance.
  */
-import { dbRead, dbUpdate } from '../db';
+import { dbRead, dbUpdate, dbListKeys } from '../db';
 import { capSpent, addCapSpend, dailyCapUsd } from '../agent/safety';
 
 /** The pair's quote state as of the last check, refreshed every run. */
@@ -190,13 +190,80 @@ export async function listLog(owner: string, limit = 50): Promise<AutomationLogE
 }
 
 /**
- * The addresses that have automations.
+ * The addresses that have automations — who the scheduler must evaluate.
  *
- * The scheduler needs to know whose automations to evaluate; this index holds
- * public addresses only — no keys, no state.
+ * The truth is the automations rows themselves: every storage key embeds its
+ * owner (`u:<address>:automations`), so the list is derived from the keys
+ * when the backend can enumerate them (Postgres, file). That makes the list
+ * *exact*: there is no cap to hit and no cache to drift, and an owner stays
+ * schedulable for as long as a row exists.
+ *
+ * The capped `automationOwners` index is kept only as a fallback for
+ * backends that cannot enumerate keys (Blob: keys are hashed into blob
+ * paths). It is best-effort there — the cap can in theory evict an owner —
+ * so it is also pruned as best the backend allows.
  */
 const OWNERS_KEY = 'automationOwners';
+/** The suffix of every owner's automations storage key (`u:<address>:automations`). */
+const AUTOMATIONS_STORAGE_SUFFIX = `:${KEY}`;
 
+/** Parse the owner address out of a `u:<address>:automations` key. */
+function ownerFromKey(key: string): string | null {
+  if (!key.startsWith('u:')) return null;
+  const rest = key.slice(2);
+  const sep = rest.indexOf(':');
+  if (sep <= 0) return null;
+  const owner = rest.slice(0, sep);
+  // Addresses never contain ':'; a second separator means a malformed key.
+  return owner.includes(':') ? null : owner;
+}
+
+/**
+ * Reconcile the fallback index with the owners that actually have rows.
+ *
+ * The derivation is exhaustive — if an address is not in `known`, its
+ * automations row is gone (deleted wallet, or the last automation removed),
+ * so the index entry is stale and can be dropped without re-reading rows.
+ */
+async function syncOwnerIndex(known: string[]): Promise<void> {
+  const raw = await dbRead<string[]>(OWNERS_KEY);
+  const list = Array.isArray(raw) ? raw : [];
+  const kept = list.filter((o) => known.includes(o));
+  if (kept.length === list.length) return;
+  await dbUpdate<string[]>(OWNERS_KEY, (current) => {
+    const live = Array.isArray(current) ? current : [];
+    return live.filter((o) => known.includes(o));
+  });
+}
+
+export async function listAutomationOwners(): Promise<string[]> {
+  // 1. Derive from the rows — exact and unbounded: an owner is schedulable
+  //    for exactly as long as its row exists, with no cap to hit and no cache
+  //    to drift.
+  const keys = await dbListKeys({ prefix: 'u:', suffix: AUTOMATIONS_STORAGE_SUFFIX }).catch(
+    () => null,
+  );
+  if (keys !== null) {
+    const owners = [...new Set(keys.map(ownerFromKey).filter((o): o is string => Boolean(o)))];
+    // Best-effort: keep the fallback index honest on this backend too.
+    void syncOwnerIndex(owners).catch(() => undefined);
+    return owners;
+  }
+
+  // 2. Backend cannot enumerate keys (Blob): fall back to the capped index.
+  //    Ghosts (deleted wallets) are not pruned here — verifying each entry
+  //    would cost a blob GET per owner, which the fallback does not justify.
+  const raw = await dbRead<string[]>(OWNERS_KEY);
+  return Array.isArray(raw) ? raw : [];
+}
+
+/**
+ * Record that an owner has automations (for the non-enumerable fallback).
+ *
+ * Best-effort: on backends that derive the owner list from the rows this is a
+ * no-op that costs nothing important, and on the Blob backend it is what
+ * makes the sweep work at all.
+ */
 async function rememberOwner(owner: string): Promise<void> {
   await dbUpdate<string[]>(OWNERS_KEY, (current) => {
     const list = Array.isArray(current) ? current : [];
@@ -205,9 +272,12 @@ async function rememberOwner(owner: string): Promise<void> {
   });
 }
 
-export async function listAutomationOwners(): Promise<string[]> {
-  const raw = await dbRead<string[]>(OWNERS_KEY);
-  return Array.isArray(raw) ? raw : [];
+/** Forget an owner's index entry (wallet deletion). No-op when absent. */
+export async function forgetAutomationOwner(owner: string): Promise<void> {
+  await dbUpdate<string[]>(OWNERS_KEY, (current) => {
+    const list = Array.isArray(current) ? current : [];
+    return list.filter((o) => o !== owner);
+  });
 }
 
 export function nextRunAt(everyMinutes: number, from = Date.now()): string {

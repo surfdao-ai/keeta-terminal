@@ -19,6 +19,7 @@
     "test:card": "tsx scripts/card-test.mjs",
     "test:automations": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/automations-test.mjs",
     "test:automation-wallet": "node --experimental-strip-types scripts/automation-wallet-test.mjs",
+    "test:owners": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/owner-index-test.mjs",
     "test:alerts": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/alerts-test.mjs"
   },
   "dependencies": {
