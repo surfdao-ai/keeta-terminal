@@ -186,13 +186,14 @@ async function getPostgres(): Promise<PgDB> {
           )}, 1) ON CONFLICT (key) DO UPDATE SET value = excluded.value, rev = kt_store.rev + 1, updated = now()`;
         },
         async listKeys(match: { prefix?: string; suffix?: string }) {
-          // Keys are `u:<address>:<key>` (addresses are keeta_[a-z0-9]), so the
-          // fragments carry no LIKE wildcards.
-          const like =
-            (match.prefix ? match.prefix : '') + '%' + (match.suffix ? match.suffix : '');
-          const rows = (await sql`SELECT key FROM kt_store WHERE key LIKE ${like}`) as unknown as {
-            key: string;
-          }[];
+          // POSITION rather than LIKE: scopes can contain the LIKE wildcards
+          // ('_' — every keeta address has it), and an accidental match would
+          // delete (or miss) records.
+          const rows = (await sql`SELECT key FROM kt_store WHERE ${
+            match.prefix ? sql`POSITION(${match.prefix} in key) = 1` : sql`true`
+          } AND ${
+            match.suffix ? sql`POSITION(${match.suffix} in key) > 0` : sql`true`
+          }`) as unknown as { key: string }[];
           return rows.map((r) => r.key);
         },
       };

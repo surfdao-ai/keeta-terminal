@@ -8,7 +8,7 @@
  * header on every mutating request.
  */
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { dbRead, dbUpdate } from '../db';
+import { dbRead, dbUpdate, dbWrite, dbListKeys } from '../db';
 
 export const SESSION_COOKIE = 'kt_session';
 export const CSRF_COOKIE = 'kt_csrf';
@@ -134,6 +134,23 @@ export interface RateLimit {
   resetSeconds: number;
 }
 
+/**
+ * Best-effort cleanup: rate-limit counters are fixed-window, so drop every
+ * `ratelimit:<scope>:*` key except the current window. Without it the keys
+ * accumulate in the store forever.
+ */
+async function gcRateLimitWindows(scope: string, keep: string): Promise<void> {
+  try {
+    const keys = await dbListKeys({ prefix: `ratelimit:${scope}:` });
+    if (!keys) return;
+    for (const k of keys) {
+      if (k !== keep) await dbWrite(k, null).catch(() => undefined);
+    }
+  } catch {
+    /* best-effort — the next consume retries */
+  }
+}
+
 /** Count one request against a session's budget for this window. */
 export async function consumeRateLimit(
   scope: string,
@@ -148,6 +165,7 @@ export async function consumeRateLimit(
     count = (typeof current === 'number' ? current : 0) + 1;
     return count;
   });
+  await gcRateLimitWindows(scope, key);
 
   const resetSeconds = windowSeconds - Math.floor((Date.now() % (windowSeconds * 1000)) / 1000);
   return { ok: count <= limit, remaining: Math.max(0, limit - count), resetSeconds };
