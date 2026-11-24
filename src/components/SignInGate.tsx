@@ -453,8 +453,12 @@ export default function SignInGate({ onSignedIn }: SignInGateProps) {
 /**
  * Passkey or passphrase.
  *
- * The passkey is only offered where the browser can actually derive a key
- * from it (WebAuthn PRF); everywhere else the passphrase is the default.
+ * The passkey is offered wherever WebAuthn exists, including browsers that
+ * don't report PRF support ("unknown"): creation then tries the passkey and
+ * the crypto layer reports clearly if the engine cannot derive a key, so the
+ * user can fall back to a passphrase. It is only hidden when the browser
+ * says PRF is impossible ("no"). The passphrase stays the *default* on
+ * unknown browsers — the user has to opt in to the passkey there.
  */
 function SealModePicker({
   mode,
@@ -468,29 +472,35 @@ function SealModePicker({
   if (prf === 'no') return null;
 
   return (
-    <div className="flex gap-2">
-      <button
-        onClick={() => onChange('passphrase')}
-        disabled={prf === 'unknown'}
-        className={`flex-1 px-3 py-1.5 rounded-lg text-[12px] font-mono ${
-          mode === 'passphrase'
-            ? 'bg-[#4C1D95] text-white'
-            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 disabled:opacity-40'
-        }`}
-      >
-        passphrase
-      </button>
-      <button
-        onClick={() => onChange('passkey')}
-        disabled={prf !== 'yes'}
-        className={`flex-1 px-3 py-1.5 rounded-lg text-[12px] font-mono ${
-          mode === 'passkey'
-            ? 'bg-[#4C1D95] text-white'
-            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 disabled:opacity-40'
-        }`}
-      >
-        passkey{prf === 'unknown' ? ' (unknown)' : ''}
-      </button>
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <button
+          onClick={() => onChange('passphrase')}
+          className={`flex-1 px-3 py-1.5 rounded-lg text-[12px] font-mono ${
+            mode === 'passphrase'
+              ? 'bg-[#4C1D95] text-white'
+              : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+          }`}
+        >
+          passphrase
+        </button>
+        <button
+          onClick={() => onChange('passkey')}
+          className={`flex-1 px-3 py-1.5 rounded-lg text-[12px] font-mono ${
+            mode === 'passkey'
+              ? 'bg-[#4C1D95] text-white'
+              : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+          }`}
+        >
+          passkey{prf === 'unknown' ? ' (try)' : ''}
+        </button>
+      </div>
+      {mode === 'passkey' && prf === 'unknown' && (
+        <p className="font-mono text-[11px] text-zinc-600">
+          This browser doesn&apos;t report passkey-key support — we&apos;ll try it anyway and tell
+          you if it can&apos;t.
+        </p>
+      )}
     </div>
   );
 }
