@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * The start-screen background: a small terminal that "types out" what
- * KTerminal can do — a faded, out-of-the-way live log, purely cosmetic.
+ * The start-screen background: a terminal that "types out" what KTerminal
+ * can do.
  *
- * It types one line at a time into a rolling log and stops (reduced motion).
- * Decorative only: pointer-events off, hidden from screen readers.
+ * It fills the sign-in screen as a faded backdrop — lines scroll upward from
+ * the bottom — and is purely cosmetic. Decorative only: pointer-events off,
+ * hidden from screen readers, static under reduced motion.
  */
 
 const LINES = [
@@ -22,7 +23,7 @@ const LINES = [
 
 const LINE_DELAY = 14; // ms per typed character
 const LINE_PAUSE = 900; // ms a finished line stays before the next
-const MAX_LINES = 7;
+const MAX_LINES = 8;
 
 export default function TerminalAnim() {
   const [log, setLog] = useState<string[]>([]);
@@ -37,11 +38,9 @@ export default function TerminalAnim() {
     }
 
     let idx = 0;
-    let typing = false;
-
     const typeLine = () => {
       const line = LINES[idx++ % LINES.length];
-      setLog((l) => [...l.slice(-(MAX_LINES - 2)), '']); // reserve the slot at the end
+      setLog((l) => [...l.slice(-(MAX_LINES - 2)), '']);
       let i = 0;
       const tick = () => {
         i += 1;
@@ -53,15 +52,12 @@ export default function TerminalAnim() {
         if (i < line.length) {
           typingRef.current = setTimeout(tick, LINE_DELAY);
         } else {
-          typing = false;
           nextRef.current = setTimeout(typeLine, LINE_PAUSE);
         }
       };
-      typing = true;
       typingRef.current = setTimeout(tick, LINE_DELAY);
     };
 
-    // A bit of life right away, then a first line.
     typingRef.current = setTimeout(typeLine, 400);
 
     return () => {
@@ -72,12 +68,12 @@ export default function TerminalAnim() {
 
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0">
-      <div className="absolute bottom-3 left-3 right-[calc(50%+0.5rem)] h-44 sm:h-48 overflow-hidden rounded-xl border border-white/[0.04] bg-black/30 backdrop-blur-sm shadow-2xl shadow-black/30">
+      <div className="absolute inset-0 overflow-hidden bg-black/40 backdrop-blur-[2px] [mask-image:linear-gradient(to_bottom,transparent_0%,black_15%,black_85%,transparent_100%)]">
         <div
-          className="h-full p-3 font-mono text-[9px] leading-snug text-zinc-400/85 [mask-image:linear-gradient(to_top,black_12%,transparent_95%)]"
+          className="absolute inset-x-0 bottom-0 p-4 sm:p-6 font-mono text-[10px] sm:text-[11px] leading-snug whitespace-nowrap text-zinc-300/85"
         >
           {log.map((l, i) => (
-            <div key={i + l} className="whitespace-nowrap">{l}</div>
+            <div key={i + l}>{l}</div>
           ))}
         </div>
       </div>
