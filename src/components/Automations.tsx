@@ -249,11 +249,6 @@ export default function Automations({
    * The seed is generated in this browser and sealed into the device vault —
    * the server only learns the address, so it can never move those funds.
    */
-  /** Ask for the vault passphrase so we can seal/unseal the automation key. */
-  async function askPassphrase(): Promise<string | null> {
-    const passphrase = window.prompt('Vault passphrase (it seals the automation key on this device)');
-    return passphrase && passphrase.length >= 8 ? passphrase : null;
-  }
 
   async function createWallet() {
     try {
@@ -264,8 +259,12 @@ export default function Automations({
         onNotice('err  unlock your wallet first (the automation key is sealed with it)');
         return;
       }
-      const passphrase = await askPassphrase();
-      if (passphrase === null) return;
+      // The automation key is sealed with the record's own key: passkey
+      // vaults re-derive it from the authenticator (a Face ID / Touch ID tap),
+      // passphrase vaults need the passphrase.
+      const passphrase =
+        rec.mode === 'passkey' ? undefined : (await askPassphrase()) ?? undefined;
+      if (rec.mode !== 'passkey' && passphrase === undefined) return;
       await withAutomationWallet(rec, passphrase, seed, address);
 
       const r = await apiFetch('/api/automations/wallet', {
@@ -281,6 +280,12 @@ export default function Automations({
     } catch (e) {
       onNotice(`err  ${(e as Error).message}`);
     }
+  }
+
+  /** Ask for the vault passphrase so we can seal the automation key. */
+  async function askPassphrase(): Promise<string | null> {
+    const passphrase = window.prompt('Vault passphrase (it seals the automation key on this device)');
+    return passphrase && passphrase.length >= 8 ? passphrase : null;
   }
 
   return (

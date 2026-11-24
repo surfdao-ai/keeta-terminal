@@ -29,6 +29,26 @@ export class PrfUnsupportedError extends Error {
   }
 }
 
+/**
+ * Raised when a legacy vault was left in the corrupted state by the first
+ * automation-wallet release: the encrypted slot that should hold the MAIN seed
+ * was overwritten with the automation seed, so the main key is not recoverable
+ * from the record on this device. The remedy (re-import the main seed) is
+ * spelled out so it is not swallowed as a "wrong passphrase".
+ */
+export class CorruptedVaultError extends Error {
+  constructor(address: string) {
+    super(
+      'This device’s vault was left in a bad state by an earlier kterminal bug: the ' +
+        'automation wallet was stored in the main wallet’s slot, so the main key on this ' +
+        'device can no longer be opened. Re-import your main wallet from the seed you wrote ' +
+        'down (sign-in → “Import an existing wallet”), then create the automation wallet ' +
+        'again. The automation wallet ' + address + ' is unaffected and still works.',
+    );
+    this.name = 'CorruptedVaultError';
+  }
+}
+
 /** What the browser tells us about WebAuthn PRF support. */
 export type PrfSupport = 'yes' | 'no' | 'unknown';
 
@@ -38,9 +58,15 @@ export interface VaultRecord {
   address: string;
   /**
    * A second, deliberately low-balance wallet for unattended automations.
-   * It is sealed in the same vault, so it never reaches the server either.
+   * The record keeps the public address only — the key is sealed inside the
+   * same encrypted slot as the main seed (a v2 payload), so it never reaches
+   * the server or sits in plaintext on this device.
+   *
+   * Legacy (pre-fix) records carry `{ seed, address }` in plaintext: the
+   * record without the seed is the healthy shape, the record *with* the seed
+   * means the broken release ran (see isCorruptedVault).
    */
-  automation?: { seed: string; address: string };
+  automation?: { address: string; seed?: string };
   /** base64 — PRF salt (passkey) or PBKDF2 salt (passphrase). */
   salt: string;
   /** base64 — AES-GCM iv. */
@@ -109,19 +135,31 @@ export function writeVault(rec: VaultRecord): void {
 
 /**
  * Add (or replace) the low-balance automation wallet inside a vault record.
- * The record is re-sealed with the same passphrase, so the automation seed is
- * protected exactly like the main one.
+ *
+ * The automation key is sealed into the same encrypted slot as the main key
+ * (as part of a v2 payload), so the record never holds either seed in
+ * plaintext and the main key is never disturbed. The slot is re-sealed with
+ * the record's own key — a passkey vault asks the authenticator, a passphrase
+ * vault uses the given passphrase — so both modes are treated identically.
  */
 export async function withAutomationWallet(
   rec: VaultRecord,
-  passphrase: string,
+  passphrase: string | undefined,
   seed: string,
   address: string,
 ): Promise<VaultRecord> {
-  const salt = fromB64(rec.salt);
-  const key = await passphraseKey(passphrase, salt);
-  const next: VaultRecord = { ...rec, automation: { seed, address } };
-  const { iv, ciphertext, tag } = await seal(key, seed);
+  if (isCorruptedVault(rec)) {
+    // The broken earlier release left its automation seed in the record in
+    // plaintext and overwrote the main key. Stacking another wallet on top
+    // would compound the damage: refuse — the main wallet must be re-imported
+    // first, and the re-import carries this automation wallet over.
+    throw new CorruptedVaultError(rec.automation?.address ?? '');
+  }
+  const key = await vaultKey(rec, passphrase);
+  const current = await openSlot(key, rec);
+  const payload: VaultPayload = { ...current, automationSeed: seed };
+  const next: VaultRecord = { ...rec, automation: { address } };
+  const { iv, ciphertext, tag } = await sealSlot(key, payload);
   const merged: VaultRecord = { ...next, iv, ciphertext, tag };
   writeVault(merged);
   return merged;
@@ -257,10 +295,46 @@ async function passkeyKey(
  * seal / open
  * ---------------------------------------------------------------- */
 
-async function seal(key: CryptoKey, seed: string): Promise<{ iv: string; ciphertext: string; tag: string }> {
+/**
+ * What is inside the encrypted slot.
+ *
+ * v1 (legacy): the main seed as a plain string.
+ * v2: JSON `{ v: 2, seed, automationSeed? }` — both keys in the same slot, so
+ * the record never holds either seed in plaintext and the automation key can
+ * never overwrite the main one (an earlier release did exactly that).
+ */
+export interface VaultPayload {
+  seed: string;
+  automationSeed?: string;
+}
+
+/** Parse an unsealed slot into a payload (v1 plain text or v2 JSON). */
+function parseVaultPayload(plain: string): VaultPayload {
+  const t = plain.trim();
+  if (t.startsWith('{')) {
+    const obj = JSON.parse(t) as { seed?: unknown; automationSeed?: unknown };
+    if (typeof obj.seed !== 'string' || !obj.seed) throw new Error('Unreadable vault payload.');
+    return {
+      seed: obj.seed,
+      ...(typeof obj.automationSeed === 'string' && obj.automationSeed ? { automationSeed: obj.automationSeed } : {}),
+    };
+  }
+  return { seed: t };
+}
+
+/** Seal a payload (both keys) into one encrypted slot. */
+async function sealSlot(
+  key: CryptoKey,
+  payload: VaultPayload,
+): Promise<{ iv: string; ciphertext: string; tag: string }> {
+  const plain = JSON.stringify({
+    v: 2,
+    seed: payload.seed,
+    ...(payload.automationSeed ? { automationSeed: payload.automationSeed } : {}),
+  });
   const iv = randomBytes(12);
   const sealed = new Uint8Array(
-    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, encoder.encode(seed) as BufferSource),
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, encoder.encode(plain) as BufferSource),
   );
   // WebCrypto appends the 16-byte tag to the ciphertext.
   return {
@@ -270,14 +344,36 @@ async function seal(key: CryptoKey, seed: string): Promise<{ iv: string; ciphert
   };
 }
 
-async function open(key: CryptoKey, rec: VaultRecord): Promise<string> {
+/** Open the encrypted slot into a payload. */
+async function openSlot(key: CryptoKey, rec: VaultRecord): Promise<VaultPayload> {
   const combined = new Uint8Array([...fromB64(rec.ciphertext), ...fromB64(rec.tag)]);
   const plain = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: fromB64(rec.iv) as BufferSource, tagLength: 128 },
     key,
     combined as BufferSource,
   );
-  return decoder.decode(plain);
+  return parseVaultPayload(decoder.decode(plain));
+}
+
+/**
+ * Derive the record's own encryption key. A passkey record asks the
+ * authenticator (no passphrase is used); a passphrase record uses the one
+ * given.
+ */
+async function vaultKey(rec: VaultRecord, passphrase?: string): Promise<CryptoKey> {
+  const salt = fromB64(rec.salt);
+  return rec.mode === 'passkey'
+    ? await passkeyKey(rec.credentialId ?? '', salt)
+    : await passphraseKey(passphrase ?? '', salt);
+}
+
+/**
+ * True when an earlier, broken automation-wallet release left this record
+ * behind: healthy records never carry the automation seed in plaintext, and
+ * the broken one overwrote the main key in the encrypted slot with it.
+ */
+export function isCorruptedVault(rec: VaultRecord): boolean {
+  return Boolean(rec.automation?.seed);
 }
 
 export interface VaultOptions {
@@ -285,8 +381,12 @@ export interface VaultOptions {
   seed: string;
   /** The public address of that seed. */
   address: string;
-  /** An optional second, low-balance wallet for automations. */
-  automation?: { seed: string; address: string };
+  /**
+   * An optional second, low-balance wallet for automations, carried over when
+   * re-sealing the same record (for example, re-importing the main wallet
+   * after the earlier corruption: the automation wallet survives it).
+   */
+  automation?: { seed?: string; address: string };
   /** 'passkey' uses WebAuthn PRF; 'passphrase' uses PBKDF2. */
   mode: VaultMode;
   /** Required for mode='passphrase'. */
@@ -310,12 +410,16 @@ export async function createVault(opts: VaultOptions): Promise<VaultRecord> {
     key = await passphraseKey(opts.passphrase, salt);
   }
 
-  const { iv, ciphertext, tag } = await seal(key, opts.seed);
+  const payload: VaultPayload = {
+    seed: opts.seed,
+    ...(opts.automation?.seed ? { automationSeed: opts.automation.seed } : {}),
+  };
+  const { iv, ciphertext, tag } = await sealSlot(key, payload);
   return {
     v: 1,
     mode: opts.mode,
     address: opts.address,
-    ...(opts.automation ? { automation: opts.automation } : {}),
+    ...(opts.automation?.address ? { automation: { address: opts.automation.address } } : {}),
     salt: toB64(salt),
     iv,
     ciphertext,
@@ -325,18 +429,24 @@ export async function createVault(opts: VaultOptions): Promise<VaultRecord> {
   };
 }
 
-/** Unlock the vault and return the seed (and the automation wallet, if any). */
+/**
+ * Unlock the vault and return the seed (and the automation wallet, if any).
+ *
+ * The automation seed is read from the same encrypted slot as the main seed,
+ * never from the record itself.
+ */
 export async function openVaultFull(
   rec: VaultRecord,
   passphrase?: string,
 ): Promise<{ seed: string; automation?: { seed: string; address: string } }> {
-  const salt = fromB64(rec.salt);
-  const key =
-    rec.mode === 'passkey'
-      ? await passkeyKey(rec.credentialId ?? '', salt)
-      : await passphraseKey(passphrase ?? '', salt);
-  const seed = await open(key, rec);
-  return { seed, ...(rec.automation ? { automation: rec.automation } : {}) };
+  const key = await vaultKey(rec, passphrase);
+  const payload = await openSlot(key, rec);
+  return {
+    seed: payload.seed,
+    ...(rec.automation?.address && payload.automationSeed
+      ? { automation: { seed: payload.automationSeed, address: rec.automation.address } }
+      : {}),
+  };
 }
 
 /** Unlock the vault and return just the main seed. */

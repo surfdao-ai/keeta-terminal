@@ -345,13 +345,24 @@ export default function SignInGate({ onSignedIn }: SignInGateProps) {
               <div className="font-mono text-[11px] text-zinc-600 break-all">{vault.address}</div>
 
               {vault.mode === 'passkey' ? (
-                <button
-                  onClick={unlock}
-                  disabled={busy}
-                  className="w-full px-3 py-2.5 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-sm text-white"
-                >
-                  {busy ? '...' : 'Unlock with your passkey'}
-                </button>
+                <>
+                  <button
+                    onClick={unlock}
+                    disabled={busy}
+                    className="w-full px-3 py-2.5 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-40 text-sm text-white"
+                  >
+                    {busy ? '...' : 'Unlock with your passkey'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setErr('');
+                      setStep('choose');
+                    }}
+                    className="w-full px-3 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-400"
+                  >
+                    Use another wallet
+                  </button>
+                </>
               ) : (
                 <>
                   <input

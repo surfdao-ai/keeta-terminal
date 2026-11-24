@@ -17,7 +17,9 @@ import {
   openVaultFull,
   readVault,
   writeVault,
+  isCorruptedVault,
   PrfUnsupportedError,
+  CorruptedVaultError,
   type VaultRecord,
 } from '@/lib/vault';
 import { generateSeedOnDevice, addressFromSeedOnDevice } from '@/lib/keeta/device';
@@ -68,6 +70,15 @@ async function sealAndStore(
     if (problem) throw new Error(problem);
   }
 
+  // Repair path: if the record on this device was left corrupted by the
+  // first automation-wallet release, the automation wallet it carries is
+  // still valid — carry it over so it survives the re-import.
+  const existing = readVault();
+  const carried =
+    existing && isCorruptedVault(existing) && existing.automation?.seed
+      ? { seed: existing.automation.seed, address: existing.automation.address }
+      : undefined;
+
   let vault: VaultRecord;
   try {
     vault = await createVault({
@@ -75,6 +86,7 @@ async function sealAndStore(
       address,
       mode,
       ...(mode === 'passphrase' ? { passphrase } : {}),
+      ...(carried ? { automation: carried } : {}),
     });
   } catch (e) {
     if (e instanceof PrfUnsupportedError) {
@@ -127,6 +139,13 @@ export async function importWallet(
 export async function unlockWallet(passphrase?: string): Promise<UnlockedWallet> {
   const vault = readVault();
   if (!vault) throw new Error('There is no wallet on this device.');
+
+  // The broken release left the automation key in the record in plaintext and
+  // the main key unrecoverable from this device. Never let the user in as the
+  // automation wallet — surface the repair steps instead.
+  if (isCorruptedVault(vault)) {
+    throw new CorruptedVaultError(vault.automation?.address ?? '');
+  }
 
   try {
     const { seed, automation } = await openVaultFull(vault, passphrase);
