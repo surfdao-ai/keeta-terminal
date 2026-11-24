@@ -148,7 +148,7 @@ export default function SignInGate({ onSignedIn }: SignInGateProps) {
     <div className="relative min-h-full bg-[#09090B] text-[#F7F7F7] flex items-center justify-center px-5 py-10">
       <TerminalAnim />
       <div className="relative z-10 w-full max-w-md">
-        <div className="flex items-center gap-3 mb-6">
+        <div className="flex items-center gap-3.5 mb-7">
 <svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true">
           <defs>
             <linearGradient id="av-bg" x1="0" y1="0" x2="0" y2="1">
@@ -167,12 +167,17 @@ export default function SignInGate({ onSignedIn }: SignInGateProps) {
   <rect x="26.50" y="12.38" width="3.80" height="8.44" rx="1.27" fill="url(#k)"/>
         </svg>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">KTerminal</h1>
-            <p className="font-mono text-[11px] text-zinc-500">sign in with your wallet</p>
+            <h1 className="text-[26px] leading-none font-bold tracking-tight">KTerminal</h1>
+            <p className="mt-1.5 font-mono text-[11px] text-zinc-500">sign in with your wallet</p>
           </div>
         </div>
 
-        <div className="bg-[#121216]/90 backdrop-blur-xl border border-white/[0.07] rounded-2xl p-6 space-y-4 shadow-2xl shadow-black/50">
+        <div className="relative bg-[#121216]/90 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-6 sm:p-7 space-y-4 shadow-[0_24px_70px_-20px_rgba(0,0,0,0.85)] ring-1 ring-white/[0.03]">
+          {/* a faint accent glow along the top edge — the "quality" cue */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-purple-500/50 to-transparent"
+          />
           {step === 'choose' && (
             <>
               <p className="text-sm text-zinc-300 leading-snug">
@@ -180,14 +185,21 @@ export default function SignInGate({ onSignedIn }: SignInGateProps) {
                 automations on a schedule, and set a daily cap — real trades signed in
                 your own wallet, so your keys never leave this browser.
               </p>
-              <div className="flex flex-wrap gap-1.5">
-                {['💬 AI chat trading', '⚡ DCA + alerts', '👛 your keys, on-device', '🛡 daily cap'].map((c) => (
-                  <span
-                    key={c}
-                    className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06] text-[11px] text-zinc-400"
-                  >
-                    {c}
-                  </span>
+              <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] divide-y divide-white/[0.04]">
+                {[
+                  { icon: '💬', title: 'AI chat trading', desc: 'Ask in plain language — quotes, portfolio, PnL, one-tap trade proposals.' },
+                  { icon: '⚡', title: 'Automations', desc: 'Recurring buys, price alerts and liquidity pings on a schedule.' },
+                  { icon: '🛡', title: 'You stay in control', desc: 'Every trade is signed in your wallet, under a daily cap you set.' },
+                ].map((f) => (
+                  <div key={f.title} className="flex items-start gap-3 px-3.5 py-3">
+                    <span className="mt-0.5 shrink-0 w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.05] flex items-center justify-center text-[15px]">
+                      {f.icon}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-semibold text-zinc-100">{f.title}</div>
+                      <div className="text-[12px] leading-snug text-zinc-400">{f.desc}</div>
+                    </div>
+                  </div>
                 ))}
               </div>
               <div className="space-y-2">

@@ -589,7 +589,7 @@ export default function Home() {
   return (
     <div className="flex h-full bg-[#09090B] text-[#F7F7F7]">
       {/* mobile top bar */}
-      <div className="md:hidden fixed top-0 inset-x-0 z-50 h-[var(--kt-header-h)] flex items-center gap-3 px-3 bg-[#101012] backdrop-blur border-b border-zinc-700/80 pt-[max(env(safe-area-inset-top,0px),2.25rem)] shadow-[0_2px_12px_rgba(0,0,0,0.65)]">
+      <div className="md:hidden fixed top-0 inset-x-0 z-50 h-[var(--kt-header-h)] flex items-center gap-3 px-3 bg-[#101012] backdrop-blur border-b border-zinc-700/80 pt-[max(env(safe-area-inset-top,0px),3rem)] shadow-[0_2px_12px_rgba(0,0,0,0.65)]">
         <button
           onClick={() => setNavOpen(!navOpen)}
           aria-label="Toggle navigation"
