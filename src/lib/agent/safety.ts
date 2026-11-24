@@ -88,8 +88,11 @@ export interface TradeRecord {
 export async function appendTrade(owner: string, r: TradeRecord): Promise<void> {
   await dbUpdate<TradeRecord[]>('trades', (current) => {
     const all = Array.isArray(current) ? current : [];
-    all.unshift(r);
-    return all.slice(0, 500);
+    // A tradeId is unique (its proposal was consumed): a duplicate — e.g. a
+    // retried submit — replaces the earlier record instead of double-counting.
+    const next = all.filter((t) => t.id !== r.id);
+    next.unshift(r);
+    return next.slice(0, 500);
   }, { owner });
 }
 
@@ -116,6 +119,38 @@ export async function addCapSpend(owner: string, usd: number): Promise<void> {
     (current) => ({ spentUsd: (current?.spentUsd ?? 0) + usd }),
     { owner },
   );
+}
+
+/**
+ * Atomically check the daily cap and reserve `costUsd` against it.
+ *
+ * `dbUpdate` is compare-and-set, so on contention the check runs again — two
+ * concurrent settles cannot both pass the cap. Returns `ok: false` when the
+ * cost does not fit, with the current spent amount for the caller's message.
+ */
+export async function reserveCap(
+  owner: string,
+  costUsd: number,
+): Promise<{ ok: boolean; spentUsd: number; capUsd: number }> {
+  const cap = await dailyCapUsd(owner);
+  let ok = false;
+  let spentUsd = 0;
+  await dbUpdate<{ spentUsd: number }>(
+    capKey(owner),
+    (current) => {
+      const next = (current?.spentUsd ?? 0) + costUsd;
+      if (next > cap) return current ?? { spentUsd: 0 };
+      ok = true;
+      spentUsd = next;
+      return { spentUsd: next };
+    },
+    { owner },
+  );
+  if (!ok) {
+    const cur = await dbRead<{ spentUsd: number }>(capKey(owner), owner);
+    spentUsd = cur?.spentUsd ?? 0;
+  }
+  return { ok, spentUsd, capUsd: cap };
 }
 
 export interface TerminalSettings {

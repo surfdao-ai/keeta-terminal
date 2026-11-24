@@ -28,7 +28,7 @@ export async function POST(req: Request) {
     if (!result.ok) {
       return NextResponse.json({ error: result.error, status: result.status }, { status: 409 });
     }
-    return NextResponse.json({ ...result, ok: true });
+    return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 409 });
   }

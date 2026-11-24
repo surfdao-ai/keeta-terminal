@@ -56,11 +56,25 @@ export async function runAutomations(owner?: string): Promise<RunReport> {
   // one failing request, not five hundred.
   const priceCache = new Map<string, number | null>();
 
+  // One liquidity probe per pair per run: several dcas/alerts can share a
+  // pair, and an anchor probe per automation per tick is network traffic
+  // with no new information (the state is pair-level).
+  const probeCache = new Map<string, Promise<Awaited<ReturnType<typeof probePairLiquidity>> | null>>();
+  const probe = (from: string, to: string, amount: string) => {
+    const key = `${from}|${to}`;
+    let p = probeCache.get(key);
+    if (!p) {
+      p = probePairLiquidity(from, to, amount).catch(() => null);
+      probeCache.set(key, p);
+    }
+    return p;
+  };
+
   // Isolation: a single owner (a database hiccup, a failing FX read) must
   // not kill the whole sweep — the other owners still get their chance.
   for (const owner of owners) {
     try {
-      await evaluateOwner(owner, report, priceCache);
+      await evaluateOwner(owner, report, priceCache, probe);
     } catch (e) {
       console.error(`automations: sweep of ${owner} failed:`, e);
       report.failed++;
@@ -76,6 +90,7 @@ async function evaluateOwner(
   owner: string,
   report: RunReport,
   priceCache: Map<string, number | null>,
+  probe: (from: string, to: string, amount: string) => Promise<Awaited<ReturnType<typeof probePairLiquidity>> | null>,
 ): Promise<void> {
   const list = await listAutomations(owner);
   const now = Date.now();
@@ -136,18 +151,16 @@ async function evaluateOwner(
     }
 
     if (a.kind === 'liquidity') {
-      const probe = await probePairLiquidity(a.fromToken, a.toToken, '1').catch(
-        () => null,
-      );
+      const pairProbe = await probe(a.fromToken, a.toToken, '1');
       const at = new Date().toISOString();
       const pair = await pairLabel(a.fromToken, a.toToken);
       patches.set(a.id, {
         ...(patches.get(a.id) ?? {}),
         lastCheckedAt: at,
-        lastState: probe?.state ?? 'unknown',
+        lastState: pairProbe?.state ?? 'unknown',
       });
 
-      if (probe?.state === 'quoted' && (a.armed ?? true)) {
+      if (pairProbe?.state === 'quoted' && (a.armed ?? true)) {
         patches.set(a.id, {
           ...(patches.get(a.id) ?? {}),
           armed: false,
@@ -167,13 +180,11 @@ async function evaluateOwner(
 
     // Recurring swap. The pair's live liquidity is refreshed every run so
     // the card always says the truth, not the last run's news.
-    const probe = await probePairLiquidity(a.fromToken, a.toToken, a.amount).catch(
-      () => null,
-    );
-    if (probe) {
+    const pairProbe = await probe(a.fromToken, a.toToken, a.amount);
+    if (pairProbe) {
       patches.set(a.id, {
         ...(patches.get(a.id) ?? {}),
-        liquidity: { state: probe.state, at: new Date().toISOString(), ...(probe.estimate ? { estimate: probe.estimate } : {}) },
+        liquidity: { state: pairProbe.state, at: new Date().toISOString(), ...(pairProbe.estimate ? { estimate: pairProbe.estimate } : {}) },
       });
     }
 
@@ -198,9 +209,9 @@ async function evaluateOwner(
 
     // No executable quote: nothing to sign. Skip this cycle and say why —
     // do not leave a pending card that can never be approved.
-    if (probe?.state !== 'quoted') {
+    if (pairProbe?.state !== 'quoted') {
       const pair = await pairLabel(a.fromToken, a.toToken);
-      const est = probe?.estimate ? ` · est ≈ ${probe.estimate}` : '';
+      const est = pairProbe?.estimate ? ` · est ≈ ${pairProbe.estimate}` : '';
       patches.set(a.id, {
         ...(patches.get(a.id) ?? {}),
         lastRunAt: new Date().toISOString(),

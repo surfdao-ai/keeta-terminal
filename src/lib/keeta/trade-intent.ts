@@ -10,7 +10,7 @@
 import * as KeetaNet from '@keetanetwork/keetanet-client';
 import { loadFXClient, userClient, toDisplay, fromDisplay } from './network';
 import { tokenDecimals, tokenSymbol, resolveTokenAddress } from './currencies';
-import { loadPending, isExpired, capSpent, dailyCapUsd, appendTrade, removePending, type PendingTrade } from '../agent/safety';
+import { loadPending, isExpired, appendTrade, removePending, reserveCap, type PendingTrade } from '../agent/safety';
 import { ephemeralAccount } from './ephemeral';
 import { probePairLiquidity } from './liquidity';
 import { pickBestQuoteIndex } from './quote-routing';
@@ -289,18 +289,24 @@ export async function submitSignedSwap(
   const exchangeId = json.exchangeID ?? null;
   const settled = status === 'completed';
   const pending = status === 'pending';
+  // The provider is the authority: a status that is neither completed nor
+  // pending means it did not happen — the answer must not claim success.
+  const ok = settled || pending;
 
-  // Only a settled swap counts against the daily cap.
-  const cap = await dailyCapUsd(owner);
-  const spent = await capSpent(owner);
-  if (settled && intent.summary.costUsd > 0 && spent + intent.summary.costUsd > cap) {
-    return {
-      ok: false,
-      status: 'failed',
-      exchangeId,
-      convertedAmount: intent.summary.receive,
-      error: `Daily cap exceeded: ${spent.toFixed(2)} + ${intent.summary.costUsd.toFixed(2)} > ${cap}`,
-    };
+  // Only a settled swap counts against the daily cap, and the reservation
+  // (check + add in one CAS) is atomic — two concurrent settles cannot both
+  // pass.
+  if (settled && intent.summary.costUsd > 0) {
+    const { ok, spentUsd, capUsd } = await reserveCap(owner, intent.summary.costUsd);
+    if (!ok) {
+      return {
+        ok: false,
+        status: 'failed',
+        exchangeId,
+        convertedAmount: intent.summary.receive,
+        error: `Daily cap exceeded: $${spentUsd.toFixed(2)} used, $${intent.summary.costUsd.toFixed(2)} more would pass the $${capUsd.toLocaleString()} cap.`,
+      };
+    }
   }
 
   await appendTrade(owner, {
@@ -322,9 +328,10 @@ export async function submitSignedSwap(
   await removePending(owner, intent.tradeId);
 
   return {
-    ok: true,
+    ok,
     status,
     exchangeId,
     convertedAmount: intent.summary.receive,
+    ...(ok ? {} : { error: `The exchange answered "${status}" — the swap did not complete.` }),
   };
 }
