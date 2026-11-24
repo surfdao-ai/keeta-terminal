@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import ToolCard from '@/components/ToolCard';
+import VoiceInput from '@/components/VoiceInput';
 import { apiFetch, csrfHeader } from '@/lib/client/api';
 import type { TradeIntent } from '@/lib/keeta/trade-types';
 
@@ -19,6 +20,8 @@ interface ChatPanelProps {
   chatId: string;
   initialMessages: UIMessage[];
   providerConfig: PanelProviderConfig | null;
+  /** The user's Venice API key — powers voice input (chat's provider key is different). */
+  voiceKey: string;
   /** A prepared trade waiting for the user to approve before it is signed. */
   tradeIntent: TradeIntent | null;
   onSignTrade: (setter: (r: unknown) => void) => void;
@@ -43,6 +46,7 @@ export default function ChatPanel({
   chatId,
   initialMessages,
   providerConfig,
+  voiceKey,
   tradeIntent,
   onSignTrade,
   onCancelTrade,
@@ -54,6 +58,7 @@ export default function ChatPanel({
   onConfirm,
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
+  const [voiceErr, setVoiceErr] = useState('');
   const [tip, setTip] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -312,6 +317,15 @@ export default function ChatPanel({
               className="w-full bg-transparent resize-none outline-none text-[15px] text-[#F7F7F7] placeholder-zinc-500 px-2.5 pt-2.5 max-h-40"
             />
             <div className="flex items-center gap-2 px-1 pb-1 pt-0.5">
+              <VoiceInput
+                disabled={loading}
+                apiKey={voiceKey}
+                onTranscript={(t) => {
+                  setVoiceErr('');
+                  setInput((prev) => (prev ? `${prev} ${t}` : t));
+                }}
+                onError={setVoiceErr}
+              />
               <span className="flex-1 min-w-0 pl-1.5 font-mono text-[10px] text-zinc-600 truncate">
                 {unlocked ? `wallet ${address?.slice(0, 12)}… unlocked` : 'wallet locked — unlock in sidebar to trade'}
                 {modelLabel ? ` · ${modelLabel}` : ' · no model configured'}
@@ -330,6 +344,9 @@ export default function ChatPanel({
               </button>
             </div>
           </form>
+          {voiceErr && (
+            <p className="mt-1.5 px-1.5 font-mono text-[11px] text-red-400/90 break-words">{voiceErr}</p>
+          )}
         </div>
       </div>
     </>

@@ -36,9 +36,37 @@ const PRESETS: { id: string; label: string; type: ProviderConfig['type']; baseUr
   { id: 'ollama', label: 'Ollama (local)', type: 'openai-compatible', baseUrl: 'http://localhost:11434/v1', name: 'ollama', defaultModel: 'llama3.1' },
   { id: 'lmstudio', label: 'LM Studio (local)', type: 'openai-compatible', baseUrl: 'http://localhost:1234/v1', name: 'lmstudio', defaultModel: 'local-model' },
   { id: 'custom', label: 'Custom (OpenAI-compatible)', type: 'openai-compatible', defaultModel: 'gpt-4o-mini' },
+  { id: 'venice', label: 'Venice (key + voice)', type: 'openai-compatible', baseUrl: 'https://api.venice.ai/api/v1', name: 'venice', defaultModel: 'deepseek-v3.2' },
 ];
 
 const STORAGE_KEY = 'keeta-terminal-provider';
+const VENICE_KEY_STORAGE = 'keeta-terminal-venice-key';
+
+/**
+ * The Venice API key powers voice input (speech-to-text); it is independent
+ * of the chat provider, so it has its own localStorage slot.
+ */
+export type VeniceKey = { apiKey: string };
+
+let veniceCache: string | null | undefined;
+function loadVeniceKey(): string {
+  if (veniceCache !== undefined) return veniceCache ?? '';
+  try {
+    veniceCache = localStorage.getItem(VENICE_KEY_STORAGE) ?? '';
+  } catch {
+    veniceCache = '';
+  }
+  return veniceCache;
+}
+function saveVeniceKey(key: string | null): void {
+  veniceCache = key ?? '';
+  try {
+    if (key) localStorage.setItem(VENICE_KEY_STORAGE, key);
+    else localStorage.removeItem(VENICE_KEY_STORAGE);
+  } catch {
+    /* private mode — the key just won't persist */
+  }
+}
 const CFG_EVENT = 'kt-provider-config';
 
 /**
@@ -159,6 +187,12 @@ export default function Home() {
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState('');
+  const [veniceKey, setVeniceKey] = useState('');
+  // Sync the stored voice key once on the client (the dialog may have opened
+  // itself before any interaction).
+  useEffect(() => {
+    setVeniceKey(loadVeniceKey());
+  }, []);
 
   const [view, setView] = useState<View>('chat');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -456,6 +490,7 @@ export default function Home() {
     setBaseUrl(b);
     setApiKey(k);
     setModel(m);
+    setVeniceKey(loadVeniceKey());
     setModelOptions([]);
     setModelsError('');
     setSetupRequested(true);
@@ -478,6 +513,7 @@ export default function Home() {
       if (apiKey.trim()) c.apiKey = apiKey.trim();
     }
     saveCfg(c);
+    saveVeniceKey(veniceKey.trim() || null);
     setSetupRequested(false);
     setSetupDismissed(true);
   }
@@ -712,6 +748,7 @@ export default function Home() {
             chatId={activeChatId}
             initialMessages={activeMessages}
             providerConfig={cfg}
+            voiceKey={veniceKey}
             cap={cap ?? null}
             unlocked={unlock.unlocked}
             address={unlock.address}
@@ -919,6 +956,18 @@ export default function Home() {
                 </label>
               </div>
             )}
+
+            <label className="flex flex-col gap-1.5 text-sm">
+              <span className="text-zinc-400">Venice API key — voice input in chat</span>
+              <input
+                type="password"
+                value={veniceKey}
+                onChange={(e) => setVeniceKey(e.target.value)}
+                placeholder="voice-to-text (mic button in the chat box)"
+                autoComplete="off"
+                className="px-3 py-2.5 rounded-lg bg-[#09090B] border border-zinc-700 focus:outline-none focus:border-purple-600 font-mono text-[13px]"
+              />
+            </label>
 
             <div className="flex flex-col gap-1.5 text-sm">
               <div className="flex items-center justify-between gap-2">
