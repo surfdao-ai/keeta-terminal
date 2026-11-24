@@ -147,7 +147,7 @@ export default function SignInGate({ onSignedIn }: SignInGateProps) {
   return (
     <div className="relative min-h-full bg-[#09090B] text-[#F7F7F7] flex items-center justify-center px-5 py-10">
       <TerminalAnim />
-      <div className="w-full max-w-md">
+      <div className="relative z-10 w-full max-w-md">
         <div className="flex items-center gap-3 mb-6">
 <svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true">
           <defs>
@@ -167,20 +167,29 @@ export default function SignInGate({ onSignedIn }: SignInGateProps) {
   <rect x="26.50" y="12.38" width="3.80" height="8.44" rx="1.27" fill="url(#k)"/>
         </svg>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">KTerminal</h1>
+            <h1 className="text-2xl font-bold tracking-tight">KTerminal</h1>
             <p className="font-mono text-[11px] text-zinc-500">sign in with your wallet</p>
           </div>
         </div>
 
-        <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-6 space-y-4">
+        <div className="bg-[#121216]/90 backdrop-blur-xl border border-white/[0.07] rounded-2xl p-6 space-y-4 shadow-2xl shadow-black/50">
           {step === 'choose' && (
             <>
-              <p className="text-sm text-zinc-400 leading-snug">
-                KTerminal is your personal Keeta trading terminal.
-                Real trades you sign in your own wallet — the keys never leave this browser,
-                so nothing the server does needs them.
-                Set a daily cap and let automations run on a schedule.
+              <p className="text-sm text-zinc-300 leading-snug">
+                Your personal Keeta trading terminal. Trade with an AI assistant, run
+                automations on a schedule, and set a daily cap — real trades signed in
+                your own wallet, so your keys never leave this browser.
               </p>
+              <div className="flex flex-wrap gap-1.5">
+                {['💬 AI chat trading', '⚡ DCA + alerts', '👛 your keys, on-device', '🛡 daily cap'].map((c) => (
+                  <span
+                    key={c}
+                    className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06] text-[11px] text-zinc-400"
+                  >
+                    {c}
+                  </span>
+                ))}
+              </div>
               <div className="space-y-2">
                 <button
                   onClick={() => {

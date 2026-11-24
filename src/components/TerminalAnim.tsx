@@ -67,15 +67,17 @@ export default function TerminalAnim() {
   }, []);
 
   return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0">
-      <div className="absolute inset-0 overflow-hidden bg-black/40 backdrop-blur-[2px] [mask-image:linear-gradient(to_bottom,transparent_0%,black_15%,black_85%,transparent_100%)]">
-        <div
-          className="absolute inset-x-0 bottom-0 p-4 sm:p-6 font-mono text-[10px] sm:text-[11px] leading-snug whitespace-nowrap text-zinc-300/85"
-        >
-          {log.map((l, i) => (
-            <div key={i + l}>{l}</div>
-          ))}
-        </div>
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 overflow-hidden [mask-image:radial-gradient(ellipse_at_center,black_25%,transparent_78%)]"
+    >
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#09090B]/60 to-[#09090B]/90" />
+      <div
+        className="absolute inset-x-0 bottom-0 p-4 sm:p-6 font-mono text-[10px] sm:text-[11px] leading-snug whitespace-nowrap text-zinc-500/70"
+      >
+        {log.map((l, i) => (
+          <div key={i + l}>{l}</div>
+        ))}
       </div>
     </div>
   );
