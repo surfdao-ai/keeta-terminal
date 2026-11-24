@@ -10,6 +10,7 @@ import {
   type SealMode,
 } from '@/lib/client/signin';
 import { prfSupport, readVault, type PrfSupport, type VaultRecord } from '@/lib/vault';
+import TerminalAnim from './TerminalAnim';
 
 interface SignInGateProps {
   /** Called once the visitor is signed in. The seeds stay in the browser. */
@@ -144,7 +145,8 @@ export default function SignInGate({ onSignedIn }: SignInGateProps) {
   const canSubmit = sealMode === 'passkey' || !passphraseHint;
 
   return (
-    <div className="min-h-full bg-[#09090B] text-[#F7F7F7] flex items-center justify-center px-5 py-10">
+    <div className="relative min-h-full bg-[#09090B] text-[#F7F7F7] flex items-center justify-center px-5 py-10">
+      <TerminalAnim />
       <div className="w-full max-w-md">
         <div className="flex items-center gap-3 mb-6">
 <svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true">
