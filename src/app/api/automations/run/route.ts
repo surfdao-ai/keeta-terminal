@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { runAutomations } from '@/lib/automations/runner';
 import { consumeRateLimit, csrfOk, sessionFromRequest } from '@/lib/auth/session';
@@ -15,7 +16,14 @@ import { consumeRateLimit, csrfOk, sessionFromRequest } from '@/lib/auth/session
 export async function POST(req: Request) {
   const secret = process.env.CRON_SECRET;
   const auth = req.headers.get('authorization');
-  const bySchedule = Boolean(secret) && auth === `Bearer ${secret}`;
+  // Timing-safe comparison, like CSRF tokens: the schedule proves itself
+  // with the shared secret, and response times must not leak it.
+  let bySchedule = false;
+  if (secret && auth) {
+    const a = Buffer.from(auth);
+    const b = Buffer.from(`Bearer ${secret}`);
+    if (a.length === b.length && timingSafeEqual(a, b)) bySchedule = true;
+  }
 
   const session = sessionFromRequest(req);
   if (!bySchedule) {

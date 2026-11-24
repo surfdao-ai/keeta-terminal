@@ -1,22 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#1b1230"/>
-      <stop offset="100%" stop-color="#09090B"/>
+      <stop offset="100%" stop-color="#09090b"/>
     </linearGradient>
     <linearGradient id="k" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#a78bfa"/>
-      <stop offset="100%" stop-color="#6d28d9"/>
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#6366f1"/>
     </linearGradient>
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="10" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
   </defs>
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <rect x="22" y="22" width="468" height="468" rx="98" fill="none" stroke="#4C1D95" stroke-width="3" opacity="0.7"/>
-  <g filter="url(#glow)">
-    <path d="M150 118 L150 394 L202 394 L202 274 L322 394 L386 394 L246 258 L386 118 L320 118 L202 240 L202 118 Z" fill="url(#k)"/>
-  </g>
-  <rect x="296" y="356" width="48" height="14" rx="3" fill="#a78bfa" opacity="0.95"/>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <rect x="378" y="176" width="54" height="120" rx="18" fill="url(#k)"/>
+  <rect x="86" y="216" width="200" height="44" rx="14" fill="url(#k)"/>
+  <rect x="86" y="96" width="175" height="44" rx="14" fill="url(#k)"/>
+  <rect x="52" y="56" width="34" height="270" rx="11" fill="url(#k)"/>
 </svg>

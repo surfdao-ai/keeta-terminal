@@ -147,9 +147,23 @@ export default function SignInGate({ onSignedIn }: SignInGateProps) {
     <div className="min-h-full bg-[#09090B] text-[#F7F7F7] flex items-center justify-center px-5 py-10">
       <div className="w-full max-w-md">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-purple-600 to-indigo-800 flex items-center justify-center font-bold text-white">
-            K
-          </div>
+<svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true">
+          <defs>
+            <linearGradient id="av-bg" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#1b1230"/>
+              <stop offset="100%" stop-color="#09090b"/>
+            </linearGradient>
+            <linearGradient id="k" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#c084fc"/>
+              <stop offset="100%" stop-color="#6366f1"/>
+            </linearGradient>
+          </defs>
+          <rect width="36" height="36" rx="8" fill="url(#av-bg)"/>
+  <rect x="3.66" y="3.94" width="2.39" height="18.98" rx="0.80" fill="url(#k)"/>
+  <rect x="6.04" y="6.75" width="12.30" height="3.09" rx="1.03" fill="url(#k)"/>
+  <rect x="6.04" y="15.19" width="14.06" height="3.09" rx="1.03" fill="url(#k)"/>
+  <rect x="26.50" y="12.38" width="3.80" height="8.44" rx="1.27" fill="url(#k)"/>
+        </svg>
           <div>
             <h1 className="text-xl font-bold tracking-tight">KTerminal</h1>
             <p className="font-mono text-[11px] text-zinc-500">sign in with your wallet</p>
@@ -159,9 +173,11 @@ export default function SignInGate({ onSignedIn }: SignInGateProps) {
         <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-6 space-y-4">
           {step === 'choose' && (
             <>
-              <p className="text-sm text-zinc-400">
-                Every visitor gets their own terminal: your own wallet, cap, automations and chats.
-                Your seed never leaves this browser.
+              <p className="text-sm text-zinc-400 leading-snug">
+                KTerminal is your personal Keeta trading terminal.
+                Real trades you sign in your own wallet — the keys never leave this browser,
+                so nothing the server does needs them.
+                Set a daily cap and let automations run on a schedule.
               </p>
               <div className="space-y-2">
                 <button
