@@ -429,7 +429,7 @@ export default function SignInGate({ onSignedIn }: SignInGateProps) {
           {err && <p className="text-xs text-red-400 whitespace-pre-wrap">{err}</p>}
         </div>
 
-        <p className="mt-4 font-mono text-[11px] text-zinc-600 leading-relaxed">
+        <p className="mt-4 font-mono text-[11px] text-zinc-300 leading-relaxed">
           The seed is generated here, sealed on this device and never sent. The server only learns
           your public address.
         </p>
