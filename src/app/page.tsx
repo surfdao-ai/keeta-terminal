@@ -566,8 +566,13 @@ export default function Home() {
   const preset = PRESETS.find((x) => x.id === presetId)!;
   const cap = state?.cap;
 
-  // No session: the only way in is a wallet signature.
-  if (session === null && !sessionChecked) {
+  // No session: the only way in is a wallet signature. The gate shows once
+  // the session check has confirmed the visitor is signed out (session null,
+  // check done) and then stays up. The earlier condition had the check
+  // inverted — it showed the gate *while* checking and hid it *after*, which
+  // stranded a brand-new visitor in the app with no way to sign in, so a
+  // wallet could never be created on a fresh device.
+  if (session === null && sessionChecked) {
     return (
       <SignInGate
         onSignedIn={(address, unlockedSeed, unlockedAutomationSeed) => {
@@ -728,7 +733,8 @@ export default function Home() {
                 await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
                 setSession(null);
                 setSeed(null);
-                setSessionChecked(false);
+                // We just dropped the session: the gate shows (null + checked).
+                setSessionChecked(true);
               }}
             />
             {unlock.unlocked && (
