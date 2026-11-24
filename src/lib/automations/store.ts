@@ -12,6 +12,14 @@
 import { dbRead, dbUpdate } from '../db';
 import { capSpent, addCapSpend, dailyCapUsd } from '../agent/safety';
 
+/** The pair's quote state as of the last check, refreshed every run. */
+export interface PairLiquidity {
+  state: 'quoted' | 'estimate-only' | 'unknown';
+  at: string;
+  /** Destination-side estimate, in display units, when only an estimate exists. */
+  estimate?: string;
+}
+
 export type Automation =
   | {
       id: string;
@@ -26,6 +34,8 @@ export type Automation =
       lastPriceUsd?: number;
       triggeredAt?: string;
       triggered?: boolean;
+      /** Re-arm after firing so it notifies on every crossing, not just the first. */
+      repeat?: boolean;
     }
   | {
       id: string;
@@ -47,6 +57,22 @@ export type Automation =
       lastExchangeId?: string | null;
       /** FX provider that accepted the pending swap. */
       lastProviderId?: string | null;
+      /** Live state of the pair, refreshed each run so the card is never stale. */
+      liquidity?: PairLiquidity;
+    }
+  | {
+      id: string;
+      kind: 'liquidity';
+      name: string;
+      fromToken: string;
+      toToken: string;
+      enabled: boolean;
+      createdAt: string;
+      /** One-shot: fires the first time the pair is quoting, then disarms. */
+      armed?: boolean;
+      lastCheckedAt?: string;
+      lastState?: PairLiquidity['state'];
+      lastFiredAt?: string;
     };
 
 export interface AutomationLogEntry {

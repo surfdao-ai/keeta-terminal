@@ -10,8 +10,9 @@
 import * as KeetaNet from '@keetanetwork/keetanet-client';
 import { loadFXClient, userClient, toDisplay, fromDisplay } from './network';
 import { tokenDecimals, tokenSymbol, resolveTokenAddress } from './currencies';
-import { loadPending, capSpent, dailyCapUsd, appendTrade, removePending, type PendingTrade } from '../agent/safety';
+import { loadPending, isExpired, capSpent, dailyCapUsd, appendTrade, removePending, type PendingTrade } from '../agent/safety';
 import { ephemeralAccount } from './ephemeral';
+import { probePairLiquidity } from './liquidity';
 import { pickBestQuoteIndex } from './quote-routing';
 import { routeKind, routeLabel } from './routes';
 import type { TradeIntent } from './trade-types';
@@ -101,6 +102,9 @@ export async function buildSwapIntent(
 ): Promise<{ intent: TradeIntent; pending: PendingTrade }> {
   const pending = await loadPending(owner, tradeId);
   if (!pending) throw new Error('Trade proposal not found or already used.');
+  // The display filters expired proposals out; the sign path must enforce it
+  // too, or a stale id could still be prepared and signed.
+  if (isExpired(pending)) throw new Error('That proposal expired — ask for it again.');
   if (pending.kind !== 'swap') throw new Error('That proposal is not a swap.');
 
   // A throwaway account is enough to ask for a quote — no user key involved.
@@ -121,31 +125,19 @@ export async function buildSwapIntent(
   } as unknown as Parameters<typeof fx.getQuotes>[0]);
 
   if (!quotes || quotes.length === 0) {
-    // Thin-liquidity market state: pull the (non-binding) estimate so the user
-    // sees what the swap *would* be worth and that it is retryable — not a
-    // dead end. The estimate is in destination-token units; when the
+    // Thin-liquidity market state: report the (non-binding) estimate so the
+    // user sees what the swap *would* be worth and that it is retryable — not
+    // a dead end. The estimate is in destination-token units; when the
     // destination is a USD coin its value is the USD value too.
-    let estDisplay: string | null = null;
+    const { estimate } = await probePairLiquidity(
+      pending.fromToken,
+      pending.toToken,
+      pending.amount,
+    );
+    const estDisplay = estimate ?? null;
     let usd: number | null = null;
-    try {
-      const res = await fx.getQuotesOrEstimates({
-        from: pending.fromToken,
-        to: pending.toToken,
-        amount: rawAmount,
-        affinity: pending.affinity,
-      } as unknown as Parameters<typeof fx.getQuotesOrEstimates>[0]);
-      const est = res?.find((r) => !r.isQuote && r.estimate) as
-        | { estimate?: { convertedAmount?: bigint } }
-        | undefined;
-      const converted = est?.estimate?.convertedAmount;
-      if (converted !== undefined) {
-        estDisplay = toDisplay(converted, toDecimals);
-        if (/USD/i.test(await tokenSymbol(pending.toToken))) {
-          usd = Number(estDisplay);
-        }
-      }
-    } catch {
-      /* no estimate either — still report the state */
+    if (estDisplay !== null && /USD/i.test(await tokenSymbol(pending.toToken))) {
+      usd = Number(estDisplay);
     }
 
     const fromSymbol = await tokenSymbol(pending.fromToken);

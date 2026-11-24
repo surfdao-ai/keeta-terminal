@@ -34,7 +34,9 @@ export async function POST(req: Request) {
     );
   }
 
-  const report = await runAutomations();
+  // A signed-in caller only evaluates its own automations; the unauthenticated
+  // schedule sweeps everyone.
+  const report = await runAutomations(session?.address);
   console.log(
     `automations run: checked=${report.checked} triggered=${report.triggered} proposed=${report.proposed} skipped=${report.skipped}`,
   );

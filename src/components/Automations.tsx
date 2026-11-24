@@ -7,13 +7,14 @@ import { readVault, withAutomationWallet } from '@/lib/vault';
 
 interface Automation {
   id: string;
-  kind: 'alert' | 'recurring';
+  kind: 'alert' | 'recurring' | 'liquidity';
   name: string;
   enabled: boolean;
   createdAt: string;
   symbol?: string;
   op?: 'gt' | 'lt';
   valueUsd?: number;
+  repeat?: boolean;
   lastCheckedAt?: string;
   lastPriceUsd?: number;
   triggeredAt?: string;
@@ -26,6 +27,12 @@ interface Automation {
   lastRunAt?: string;
   lastStatus?: string;
   lastMessage?: string;
+  /** Live pair state, refreshed each run. */
+  liquidity?: { state: 'quoted' | 'estimate-only' | 'unknown'; at: string; estimate?: string };
+  /** Liquidity-alert fields. */
+  armed?: boolean;
+  lastState?: 'quoted' | 'estimate-only' | 'unknown';
+  lastFiredAt?: string;
 }
 
 interface LogEntry {
@@ -111,15 +118,18 @@ export default function Automations({
   const [watchSymbol, setWatchSymbol] = useState('KTA');
   const [watchBusy, setWatchBusy] = useState(false);
 
-  const [kind, setKind] = useState<'alert' | 'recurring'>('alert');
+  const [kind, setKind] = useState<'alert' | 'recurring' | 'liquidity'>('alert');
   const [name, setName] = useState('');
   const [symbol, setSymbol] = useState('KTA');
   const [op, setOp] = useState<'gt' | 'lt'>('gt');
   const [valueUsd, setValueUsd] = useState('1');
+  const [repeat, setRepeat] = useState(false);
   const [fromToken, setFromToken] = useState('USDC');
   const [toToken, setToToken] = useState('KTA');
   const [amount, setAmount] = useState('5');
   const [everyMinutes, setEveryMinutes] = useState('60');
+  const [liqFrom, setLiqFrom] = useState('KTA');
+  const [liqTo, setLiqTo] = useState('USDC');
 
   const load = useCallback(async () => {
     const r = await apiFetch('/api/automations');
@@ -158,8 +168,10 @@ export default function Automations({
     try {
       const payload =
         kind === 'alert'
-          ? { kind, name, symbol, op, valueUsd: Number(valueUsd) }
-          : { kind, name, fromToken, toToken, amount, everyMinutes: Number(everyMinutes) };
+          ? { kind, name, symbol, op, valueUsd: Number(valueUsd), ...(repeat ? { repeat: true } : {}) }
+          : kind === 'recurring'
+            ? { kind, name, fromToken, toToken, amount, everyMinutes: Number(everyMinutes) }
+            : { kind, name, fromToken: liqFrom, toToken: liqTo };
       const r = await apiFetch('/api/automations', {
         method: 'POST',
         json: payload,
@@ -449,7 +461,7 @@ export default function Automations({
 
         <form onSubmit={create} className="space-y-3">
           <div className="flex gap-1">
-            {(['alert', 'recurring'] as const).map((k) => (
+            {(['alert', 'recurring', 'liquidity'] as const).map((k) => (
               <button
                 key={k}
                 type="button"
@@ -458,7 +470,7 @@ export default function Automations({
                   kind === k ? 'bg-[#4C1D95] text-white' : 'bg-zinc-800 text-zinc-400'
                 }`}
               >
-                {k}
+                {k === 'recurring' ? 'dca' : k}
               </button>
             ))}
           </div>
@@ -468,40 +480,74 @@ export default function Automations({
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={kind === 'alert' ? 'KTA above $1' : 'weekly DCA'}
+              placeholder={kind === 'alert' ? 'KTA above $1' : kind === 'recurring' ? 'weekly DCA' : 'KTA→USDC is back'}
               className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm text-[#F7F7F7] focus:outline-none focus:border-purple-600"
             />
           </label>
 
           {kind === 'alert' ? (
-            <div className="grid grid-cols-3 gap-2">
-              <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
-                token
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+                  token
+                  <input
+                    value={symbol}
+                    onChange={(e) => setSymbol(e.target.value)}
+                    className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+                  condition
+                  <select
+                    value={op}
+                    onChange={(e) => setOp(e.target.value as 'gt' | 'lt')}
+                    className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm"
+                  >
+                    <option value="gt">above</option>
+                    <option value="lt">below</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+                  usd
+                  <input
+                    value={valueUsd}
+                    onChange={(e) => setValueUsd(e.target.value)}
+                    className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
+                  />
+                </label>
+              </div>
+              <label className="flex items-center gap-2 text-[12px] text-zinc-400 cursor-pointer">
                 <input
-                  value={symbol}
-                  onChange={(e) => setSymbol(e.target.value)}
+                  type="checkbox"
+                  checked={repeat}
+                  onChange={(e) => setRepeat(e.target.checked)}
+                  className="accent-purple-600"
+                />
+                repeat — notify on every crossing, not just the first
+              </label>
+            </div>
+          ) : kind === 'liquidity' ? (
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
+                from
+                <input
+                  value={liqFrom}
+                  onChange={(e) => setLiqFrom(e.target.value)}
                   className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
                 />
               </label>
               <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
-                condition
-                <select
-                  value={op}
-                  onChange={(e) => setOp(e.target.value as 'gt' | 'lt')}
-                  className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm"
-                >
-                  <option value="gt">above</option>
-                  <option value="lt">below</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-[11px] text-zinc-400">
-                usd
+                to
                 <input
-                  value={valueUsd}
-                  onChange={(e) => setValueUsd(e.target.value)}
+                  value={liqTo}
+                  onChange={(e) => setLiqTo(e.target.value)}
                   className="px-3 py-2 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
                 />
               </label>
+              <p className="col-span-2 text-[10px] text-zinc-600">
+                Fires once, the first time the pair has a live quote — then it is done. Pairs with your
+                DCA get pinged the moment it can fill.
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -569,8 +615,10 @@ export default function Automations({
                 <span className="font-mono text-[12px] text-zinc-200 truncate">{a.name}</span>
                 <span className="font-mono text-[10px] text-zinc-600">
                   {a.kind === 'alert'
-                    ? `${a.symbol} ${a.op === 'gt' ? '>' : '<'} $${a.valueUsd}`
-                    : `${a.amount} ${String(a.fromToken).slice(0, 10)}… → ${String(a.toToken).slice(0, 10)}… every ${a.everyMinutes}m`}
+                    ? `${a.symbol} ${a.op === 'gt' ? '>' : '<'} $${a.valueUsd}${a.repeat ? ' · repeat' : ''}`
+                    : a.kind === 'liquidity'
+                      ? `notify when ${String(a.fromToken).slice(0, 10)}… → ${String(a.toToken).slice(0, 10)}… is live`
+                      : `${a.amount} ${String(a.fromToken).slice(0, 10)}… → ${String(a.toToken).slice(0, 10)}… every ${a.everyMinutes}m`}
                 </span>
                 <button
                   onClick={() => toggle(a.id)}
@@ -602,6 +650,26 @@ export default function Automations({
                       last: {a.lastStatus ?? '—'}
                       {a.lastMessage ? ` · ${a.lastMessage}` : ''}
                     </div>
+                    {a.liquidity && (
+                      <div className={a.liquidity.state === 'quoted' ? 'text-emerald-400' : 'text-amber-400'}>
+                        liquidity: {a.liquidity.state === 'quoted' ? 'live quotes — fills when signed' : a.liquidity.state === 'estimate-only' ? `estimate only${a.liquidity.estimate ? ` (≈ ${a.liquidity.estimate})` : ''} — waiting` : 'unknown'}
+                        {a.liquidity.at ? ` · ${new Date(a.liquidity.at).toLocaleTimeString()}` : ''}
+                      </div>
+                    )}
+                  </>
+                )}
+                {a.kind === 'liquidity' && (
+                  <>
+                    <div>
+                      pair: {a.lastState === 'quoted' ? 'live quotes' : a.lastState === 'estimate-only' ? 'estimate only' : a.lastState ?? 'not checked yet'}
+                      {a.lastCheckedAt ? ` · ${new Date(a.lastCheckedAt).toLocaleTimeString()}` : ''}
+                    </div>
+                    {a.lastFiredAt && (
+                      <div className="text-amber-400">fired: {new Date(a.lastFiredAt).toLocaleString()}</div>
+                    )}
+                    {a.armed === false && (
+                      <div>done — the pair went live; delete when you have used it</div>
+                    )}
                   </>
                 )}
               </div>

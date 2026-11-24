@@ -117,9 +117,12 @@ async function waitFor(predicate, ms = 20000) {
   return false;
 }
 function button(label) {
-  return [...document.querySelectorAll('button')].find((b) =>
-    b.textContent?.trim().toLowerCase().includes(label.toLowerCase()),
-  );
+  // Match by accessible name — visible text OR aria-label — since the send
+  // button is icon-only.
+  return [...document.querySelectorAll('button')].find((b) => {
+    const name = `${b.getAttribute('aria-label') ?? ''} ${b.textContent ?? ''}`;
+    return name.trim().toLowerCase().includes(label.toLowerCase());
+  });
 }
 async function click(label) {
   const b = button(label);

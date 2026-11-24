@@ -62,6 +62,26 @@ check(
   )?.id === 'ok',
 );
 
+// Liquidity ("is back") alerts are surfaced too; everything else is not.
+check(
+  'a liquidity alert fires in the banner',
+  latestNewAlert([a('l', '2026-11-23T14:00:00Z', 'liquidity', 'triggered')], null)?.id === 'l',
+);
+check(
+  'non-triggered liquidity entries are ignored',
+  latestNewAlert([a('l', '2026-11-23T14:00:00Z', 'liquidity', 'skipped')], null) === null,
+);
+check(
+  'price alert newer than a liquidity alert wins',
+  latestNewAlert(
+    [
+      a('l', '2026-11-23T13:00:00Z', 'liquidity', 'triggered'),
+      a('p', '2026-11-23T14:00:00Z', 'alert', 'triggered'),
+    ],
+    '2026-11-23T12:00:00Z',
+  )?.id === 'p',
+);
+
 // Multiple new: the newest by timestamp wins, regardless of array order.
 check(
   'multiple new -> newest by timestamp',

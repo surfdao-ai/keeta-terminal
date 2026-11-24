@@ -11,10 +11,14 @@ export interface AlertLogEntry {
 }
 
 /**
- * The newest *alert* log entry that fired after the watermark. On a fresh
- * load the watermark is unset, so this returns the most recent fired alert —
- * the user is told once about it — and that timestamp becomes the watermark,
- * so later polls only chime when something *newer* fires.
+ * The newest *notifiable* log entry that fired after the watermark. On a
+ * fresh load the watermark is unset, so this returns the most recent fired
+ * entry — the user is told once about it — and that timestamp becomes the
+ * watermark, so later polls only chime when something *newer* fires.
+ *
+ * Notifiable kinds: price alerts and liquidity ("is back") alerts. Proposals
+ * and skips are not surfaced — they have a dedicated home in the Automations
+ * view.
  */
 export function latestNewAlert(
   log: AlertLogEntry[],
@@ -22,7 +26,7 @@ export function latestNewAlert(
 ): AlertLogEntry | null {
   let newest: AlertLogEntry | null = null;
   for (const e of log) {
-    if (e.kind !== 'alert' || e.status !== 'triggered') continue;
+    if ((e.kind !== 'alert' && e.kind !== 'liquidity') || e.status !== 'triggered') continue;
     if (watermark !== null && e.at <= watermark) continue;
     if (!newest || e.at > newest.at) newest = e;
   }

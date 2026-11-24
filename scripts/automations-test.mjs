@@ -96,6 +96,7 @@ const canForceDue = isLocal && fs.existsSync(DATA_FILE);
 
 let alertId = '';
 let dcaId = '';
+let dcaDryId = '';
 
 /* ------------------------------------------------------------------ *
  * 1. A price alert that should fire + one that should not
@@ -136,16 +137,73 @@ check('the high alert did NOT fire', quietA?.triggered === false, JSON.stringify
 const logTrigger = (state.json.log ?? []).some((l) => l.automationId === alertId && l.status === 'triggered');
 check('the alert is in the activity log', logTrigger);
 
+// A repeat alert fires on the crossing, then does NOT re-fire every cycle
+// while the price stays over the line (edge-triggered, not level-triggered).
+const rep = await api('POST', '/api/automations', {
+  kind: 'alert',
+  name: 'test-repeat',
+  symbol: 'KTA',
+  op: 'gt',
+  valueUsd: 0.01,
+  repeat: true,
+});
+const repId = rep.json.automation?.id ?? '';
+const logFor = (id, r) => (r.json.log ?? []).filter((l) => l.automationId === id && l.status === 'triggered');
+await api('POST', '/api/automations/run', {});
+const afterFirst = (await api('GET', '/api/automations')).json.log ?? [];
+check('the repeat alert fired on the crossing', logFor(repId, { json: { log: afterFirst } }).length >= 1);
+await api('POST', '/api/automations/run', {});
+const afterSecond = (await api('GET', '/api/automations')).json.log ?? [];
+check('it did not re-fire while still over the line', logFor(repId, { json: { log: afterSecond } }).length === logFor(repId, { json: { log: afterFirst } }).length, `log entries: ${logFor(repId, { json: { log: afterSecond } }).length}`);
+
+/* ------------------------------------------------------------------ *
+ * 2b. A one-shot liquidity alert (seeded straight into the store)
+ * ------------------------------------------------------------------ */
+
+console.log('\n== liquidity alert: fires once when a pair starts quoting ==');
+// Dry pair (KTA→USDC is estimate-only today) must stay armed.
+const liqDry = await api('POST', '/api/automations', {
+  kind: 'liquidity', name: 'test-liq-dry', fromToken: 'KTA', toToken: 'USDC',
+});
+check('created the dry liquidity alert', liqDry.status === 200 && liqDry.json.automation, JSON.stringify(liqDry.json).slice(0, 120));
+const dryId = liqDry.json.automation?.id ?? '';
+// Quoted pair (KBUSD→KUSD fills via the base anchor today) should fire.
+const liqLive = await api('POST', '/api/automations', {
+  kind: 'liquidity', name: 'test-liq-live', fromToken: 'KBUSD', toToken: 'KUSD',
+});
+const liveId = liqLive.json.automation?.id ?? '';
+
+const run3 = await api('POST', '/api/automations/run', {});
+check('the liquidity run answered', run3.status === 200 && run3.json.ok === true, JSON.stringify(run3.json).slice(0, 140));
+const st3 = await api('GET', '/api/automations');
+const dryA = (st3.json.automations ?? []).find((a) => a.id === dryId);
+const liveA = (st3.json.automations ?? []).find((a) => a.id === liveId);
+check('the dry pair stayed armed (not yet liquid)', dryA?.armed === true, JSON.stringify(dryA ?? {}).slice(0, 160));
+// KBUSD→KUSD is the base anchor's reliable fill today; expect it to fire. Do
+// not hard-fail if the market shifts — just report.
+if (liveA?.armed === false) {
+  check('the quoted pair fired once', Boolean(liveA?.lastFiredAt), JSON.stringify(liveA).slice(0, 140));
+  check('the fire is in the activity log', (st3.json.log ?? []).some((l) => l.automationId === liveId && l.status === 'triggered' && l.kind === 'liquidity'));
+} else {
+  console.log('   (KBUSD→KUSD not quoting right now — skipping the fire assertion, market-dependent)');
+}
+
+// Clean the liquidity probes.
+for (const id of [liveId, dryId]) {
+  if (id) await api('POST', '/api/automations', { action: 'delete', id });
+}
+
 /* ------------------------------------------------------------------ *
  * 2. A recurring (DCA) swap, forced due, must *propose* not execute
  * ------------------------------------------------------------------ */
 
-console.log('\n== dca: recurring swap is proposed, never auto-executed ==');
+console.log('\n== dca: a quoted pair proposes; a dry pair skips ==');
+// A quoted pair (KBUSD→KUSD fills via the base anchor today) must propose.
 const dca = await api('POST', '/api/automations', {
   kind: 'recurring',
   name: 'test-dca',
-  fromToken: 'KTA',
-  toToken: 'USDC',
+  fromToken: 'KBUSD',
+  toToken: 'KUSD',
   amount: '0.01',
   everyMinutes: 15,
 });
@@ -153,34 +211,58 @@ check('created the recurring swap', dca.status === 200 && dca.json.automation, J
 dcaId = dca.json.automation?.id ?? '';
 const dcaNext = dca.json.automation?.nextRunAt;
 
-let run2;
-if (dcaId && canForceDue) {
-  // The API always schedules the first run 15m out. Nudge it into the past in
-  // the file store, the way the real scheduler would after 15 minutes.
+// A dry pair (KTA→USDC is estimate-only today) must skip, not propose.
+const dcaDry = await api('POST', '/api/automations', {
+  kind: 'recurring',
+  name: 'test-dca-dry',
+  fromToken: 'KTA',
+  toToken: 'USDC',
+  amount: '0.01',
+  everyMinutes: 15,
+});
+dcaDryId = dcaDry.json.automation?.id ?? '';
+
+// A due swap on a quoted pair proposes; one on a dry pair skips with a
+// message and leaves no unapprovable pending card.
+const dcaDue = (id) => {
   const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   const key = `u:${setup.address.toLowerCase()}:automations`;
   const list = data[key] ?? [];
-  const a = list.find((x) => x.id === dcaId);
+  const a = list.find((x) => x.id === id);
   if (a) {
     a.nextRunAt = new Date(Date.now() - 60_000).toISOString();
     data[key] = list;
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-    console.log('   (forced the due time 1m into the past in the file store)');
+    return true;
+  }
+  return false;
+};
+
+let run2;
+if (dcaId && canForceDue) {
+  // The API always schedules the first run 15m out. Nudge both into the past
+  // in the file store, the way the real scheduler would after 15 minutes.
+  if (dcaDue(dcaId) && dcaDue(dcaDryId)) {
+    console.log('   (forced both due times 1m into the past in the file store)');
   } else {
-    console.log('   (could not find the DCA in the file store)');
+    console.log('   (could not find the DCA(s) in the file store)');
   }
 
   run2 = await api('POST', '/api/automations/run', {});
   check('the run answered', run2.status === 200 && run2.json.ok === true, JSON.stringify(run2.json).slice(0, 140));
-  check('the due swap was proposed', (run2.json.proposed ?? 0) >= 1, `proposed=${run2.json.proposed}`);
+  check('the due quoted-pair swap was proposed', (run2.json.proposed ?? 0) >= 1, `proposed=${run2.json.proposed}`);
 
   const st2 = await api('GET', '/api/automations');
   const dcaA = (st2.json.automations ?? []).find((x) => x.id === dcaId);
-  check('the swap is waiting for approval', dcaA?.lastStatus === 'proposed', `lastStatus=${dcaA?.lastStatus}`);
+  check('the quoted swap is waiting for approval', dcaA?.lastStatus === 'proposed', `lastStatus=${dcaA?.lastStatus}`);
   check('nothing was auto-executed', dcaA?.lastStatus !== 'executed' && dcaA?.lastStatus !== 'submitted', dcaA?.lastMessage ?? '');
   check('it left a pending trade to sign', (st2.json.pending ?? []).length >= 1, `pending=${st2.json.pending?.length}`);
   const logProp = (st2.json.log ?? []).some((l) => l.automationId === dcaId && l.status === 'proposed');
   check('the proposal is in the activity log', logProp);
+
+  const dcaDryA = (st2.json.automations ?? []).find((x) => x.id === dcaDryId);
+  check('the dry-pair swap was skipped, not proposed', dcaDryA?.lastStatus === 'skipped', `lastStatus=${dcaDryA?.lastStatus}`);
+  check('the skip says why', /no live liquidity|estimate/i.test(dcaDryA?.lastMessage ?? ''), dcaDryA?.lastMessage ?? '');
 } else if (dcaId) {
   console.log('   (skipped: the due time can only be forced against the local file store — the proposal path is covered by the trade test)');
   // The swap is still a valid, scheduled automation: it simply is not due yet,
@@ -196,7 +278,7 @@ if (dcaId && canForceDue) {
  * Cleanup: delete the automations, then the wallet
  * ------------------------------------------------------------------ */
 
-for (const id of [dcaId, alertId, quietId]) {
+for (const id of [dcaId, dcaDryId, alertId, quietId, repId]) {
   if (id) await api('POST', '/api/automations', { action: 'delete', id });
 }
 try {

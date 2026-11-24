@@ -10,6 +10,7 @@ import {
 } from '@/lib/automations/store';
 import { getAutomationWallet } from '@/lib/automations/wallet';
 import { resolveToken } from '@/lib/automations/prices';
+import { probePairLiquidity } from '@/lib/keeta/liquidity';
 import { listPending } from '@/lib/agent/safety';
 
 export async function GET(req: Request) {
@@ -49,8 +50,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, automation: updated ?? a });
   }
 
-  const kind = body.kind === 'recurring' ? 'recurring' : 'alert';
-  const name = String(body.name ?? '').trim() || (kind === 'alert' ? 'Price alert' : 'Recurring swap');
+  const kind =
+    body.kind === 'recurring'
+      ? 'recurring'
+      : body.kind === 'liquidity'
+        ? 'liquidity'
+        : 'alert';
+  const name =
+    String(body.name ?? '').trim() ||
+    (kind === 'alert' ? 'Price alert' : kind === 'recurring' ? 'Recurring swap' : 'Liquidity alert');
 
   if (kind === 'alert') {
     const symbol = String(body.symbol ?? '').trim();
@@ -70,6 +78,32 @@ export async function POST(req: Request) {
       enabled: true,
       createdAt: new Date().toISOString(),
       triggered: false,
+      ...(body.repeat === true ? { repeat: true } : {}),
+    };
+    await upsertAutomation(owner, automation);
+    return NextResponse.json({ ok: true, automation });
+  }
+
+  if (kind === 'liquidity') {
+    const fromRef = String(body.fromToken ?? '').trim();
+    const toRef = String(body.toToken ?? '').trim();
+    if (!fromRef || !toRef) {
+      return NextResponse.json({ error: 'fromToken and toToken are required' }, { status: 400 });
+    }
+    const from = await resolveToken(fromRef).catch(() => null);
+    const to = await resolveToken(toRef).catch(() => null);
+    if (!from || !to) {
+      return NextResponse.json({ error: `Could not resolve ${!from ? fromRef : toRef} on Keeta` }, { status: 400 });
+    }
+    const automation: Automation = {
+      id: crypto.randomUUID(),
+      kind: 'liquidity',
+      name,
+      fromToken: from.address,
+      toToken: to.address,
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      armed: true,
     };
     await upsertAutomation(owner, automation);
     return NextResponse.json({ ok: true, automation });
@@ -97,6 +131,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Could not resolve ${!from ? fromRef : toRef} on Keeta` }, { status: 400 });
   }
 
+  // Probe the pair once so the card shows its live state immediately, not
+  // "never checked" until the first scheduled run 15 minutes out.
+  const probe = await probePairLiquidity(from.address, to.address, amount).catch(() => null);
+
   const automation: Automation = {
     id: crypto.randomUUID(),
     kind: 'recurring',
@@ -108,6 +146,9 @@ export async function POST(req: Request) {
     enabled: true,
     createdAt: new Date().toISOString(),
     nextRunAt: new Date(Date.now() + everyMinutes * 60_000).toISOString(),
+    ...(probe
+      ? { liquidity: { state: probe.state, at: new Date().toISOString(), ...(probe.estimate ? { estimate: probe.estimate } : {}) } }
+      : {}),
   };
   await upsertAutomation(owner, automation);
   return NextResponse.json({ ok: true, automation });

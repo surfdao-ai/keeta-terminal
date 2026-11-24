@@ -11,8 +11,9 @@ An AI chat trading terminal for the Keeta Network — a bnkr.bot-style agent, bu
 - **The seed never leaves the browser** — trades are proposed by the server, signed in the browser, and only the signed block is sent back
 - Atomic swaps via Keeta FX anchors (propose → confirm → sign in the browser on every trade)
 - **Token launches** — create new native Keeta tokens from chat (no contract; supply minted to creator)
+- **Automations** — price alerts (one-shot or repeat), "liquidity is back" alerts, and recurring (DCA) swaps that propose on schedule and fill when you sign; a fired alert raises a banner + chime in the app
 - Hard daily spend cap enforced in code before any block is signed
-- Read-only Keeta market data via KeeSpecs MCP (prices, providers, tokens)
+- Read-only Keeta market data via KeeSpecs MCP (prices, providers, tokens, username resolution)
 - Trade history log
 - **PWA** — installable, offline shell, mobile-first layout
 
@@ -108,11 +109,13 @@ checks the numbers a person would read are on screen.
 
 `test:automations` drives the automation engine with a throwaway wallet: a
 price alert that should fire (and one that must not) against the live KTA
-price, and a recurring (DCA) swap — forced past its due time on the local file
-store — which must *propose* a pending trade that waits for the user to sign,
-never auto-execute (the key stays in the browser, and a dry pair simply stays
-pending). On a Postgres/Blob backend the force-due step is skipped and it
-instead checks a not-yet-due swap is left alone.
+price, a one-shot liquidity alert (fires the first time a pair starts quoting;
+a dry pair stays armed), a repeating price alert (fires on the crossing, not
+on every cycle), and a recurring (DCA) swap — forced past its due time on the
+local file store — which must *propose* a pending trade to sign when the pair
+is quoting and *skip with a reason* when it is dry (never auto-executes; the
+key stays in the browser). On a Postgres/Blob backend the force-due step is
+skipped and it instead checks a not-yet-due swap is left alone.
 
 `test:alerts` unit-tests the alert-surfacing helper — which fired alert is
 "new" relative to a watermark — so the app's banner and chime fire exactly

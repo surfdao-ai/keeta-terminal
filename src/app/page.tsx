@@ -186,7 +186,7 @@ export default function Home() {
   const [capSaving, setCapSaving] = useState(false);
   const [capMsg, setCapMsg] = useState('');
   const [notice, setNotice] = useState('');
-  const [alertBanner, setAlertBanner] = useState<{ text: string; at: string } | null>(null);
+  const [alertBanner, setAlertBanner] = useState<{ text: string; at: string; kind: string } | null>(null);
   // The newest alert-trigger we have already announced, so a page load does not
   // chime about alerts that fired before the app was open.
   const announcedAlertAt = useRef<string | null>(null);
@@ -374,7 +374,7 @@ export default function Home() {
         const newest = latestNewAlert(log, announcedAlertAt.current);
         if (newest) {
           announcedAlertAt.current = newest.at;
-          setAlertBanner({ text: newest.message, at: newest.at });
+          setAlertBanner({ text: newest.message, at: newest.at, kind: newest.kind });
           alertChime();
         }
       } catch {
@@ -979,7 +979,9 @@ export default function Home() {
         >
           <span className="text-amber-400 text-[15px] leading-none">◈</span>
           <span className="min-w-0">
-            <span className="text-amber-300/80 text-[10px] uppercase tracking-wider">price alert</span>
+            <span className="text-amber-300/80 text-[10px] uppercase tracking-wider">
+              {alertBanner.kind === 'liquidity' ? 'liquidity back' : 'price alert'}
+            </span>
             <span className="block truncate">{alertBanner.text}</span>
           </span>
         </button>
