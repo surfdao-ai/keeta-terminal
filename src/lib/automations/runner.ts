@@ -56,171 +56,190 @@ export async function runAutomations(owner?: string): Promise<RunReport> {
   // one failing request, not five hundred.
   const priceCache = new Map<string, number | null>();
 
+  // Isolation: a single owner (a database hiccup, a failing FX read) must
+  // not kill the whole sweep — the other owners still get their chance.
   for (const owner of owners) {
-    const list = await listAutomations(owner);
-    const now = Date.now();
-    const patches = new Map<string, Partial<Automation>>();
+    try {
+      await evaluateOwner(owner, report, priceCache);
+    } catch (e) {
+      console.error(`automations: sweep of ${owner} failed:`, e);
+      report.failed++;
+      report.details.push(`sweep ${owner}: ${(e as Error).message}`);
+    }
+  }
 
-    for (const a of list) {
-      if (!a.enabled) continue;
-      report.checked++;
+/**
+ * Evaluate one owner's automations. Anything thrown propagates to the sweep
+ * loop, which records the failure and still reaches the other owners.
+ */
+async function evaluateOwner(
+  owner: string,
+  report: RunReport,
+  priceCache: Map<string, number | null>,
+): Promise<void> {
+  const list = await listAutomations(owner);
+  const now = Date.now();
+  const patches = new Map<string, Partial<Automation>>();
 
-      if (a.kind === 'alert') {
-        // One lookup per symbol per run — the cache holds the result, null
-        // included, so a down source costs one failing request, not one per
-        // owner.
-        let price: number | null;
-        if (priceCache.has(a.symbol)) {
-          price = priceCache.get(a.symbol) ?? null;
-        } else {
-          price = await getTokenPriceUsd(a.symbol).catch(() => null);
-          priceCache.set(a.symbol, price);
-        }
-        patches.set(a.id, {
-          lastCheckedAt: new Date().toISOString(),
-          ...(price !== null ? { lastPriceUsd: price } : {}),
-        });
+  for (const a of list) {
+    if (!a.enabled) continue;
+    report.checked++;
 
-        if (price === null) {
-          report.skipped++;
-          report.details.push(`alert ${a.name}: no price source`);
-          continue;
-        }
+    if (a.kind === 'alert') {
+      // One lookup per symbol per run — the cache holds the result, null
+      // included, so a down source costs one failing request, not one per
+      // owner.
+      let price: number | null;
+      if (priceCache.has(a.symbol)) {
+        price = priceCache.get(a.symbol) ?? null;
+      } else {
+        price = await getTokenPriceUsd(a.symbol).catch(() => null);
+        priceCache.set(a.symbol, price);
+      }
+      patches.set(a.id, {
+        lastCheckedAt: new Date().toISOString(),
+        ...(price !== null ? { lastPriceUsd: price } : {}),
+      });
 
-        const hit = a.op === 'gt' ? price > a.valueUsd : price < a.valueUsd;
-        // One-shot: fire the first time the line is crossed, then stay armed
-        // (triggered=true) until the user deletes it.
-        // Repeat: fire on the crossing IN, re-arm the moment the price crosses
-        // back out, so it notifies on every excursion — not every cycle.
-        if (a.repeat && !hit && a.triggered) {
-          patches.set(a.id, {
-            ...(patches.get(a.id) ?? {}),
-            triggered: false,
-          });
-        } else if (hit && !a.triggered) {
-          patches.set(a.id, {
-            ...(patches.get(a.id) ?? {}),
-            triggered: true,
-            triggeredAt: new Date().toISOString(),
-          });
-          report.triggered++;
-          report.details.push(`alert ${a.name}: ${a.symbol} ${price} ${a.op} ${a.valueUsd}`);
-          await appendLog(owner, {
-            automationId: a.id,
-            kind: 'alert',
-            status: 'triggered',
-            message: `${a.symbol} at $${price} (${a.op} $${a.valueUsd})`,
-          });
-        }
+      if (price === null) {
+        report.skipped++;
+        report.details.push(`alert ${a.name}: no price source`);
         continue;
       }
 
-      if (a.kind === 'liquidity') {
-        const probe = await probePairLiquidity(a.fromToken, a.toToken, '1').catch(
-          () => null,
-        );
-        const at = new Date().toISOString();
-        const pair = await pairLabel(a.fromToken, a.toToken);
+      const hit = a.op === 'gt' ? price > a.valueUsd : price < a.valueUsd;
+      // One-shot: fire the first time the line is crossed, then stay armed
+      // (triggered=true) until the user deletes it.
+      // Repeat: fire on the crossing IN, re-arm the moment the price crosses
+      // back out, so it notifies on every excursion — not every cycle.
+      if (a.repeat && !hit && a.triggered) {
         patches.set(a.id, {
           ...(patches.get(a.id) ?? {}),
-          lastCheckedAt: at,
-          lastState: probe?.state ?? 'unknown',
+          triggered: false,
         });
-
-        if (probe?.state === 'quoted' && (a.armed ?? true)) {
-          patches.set(a.id, {
-            ...(patches.get(a.id) ?? {}),
-            armed: false,
-            lastFiredAt: at,
-          });
-          report.triggered++;
-          report.details.push(`liquidity ${a.name}: ${pair} now has live quotes`);
-          await appendLog(owner, {
-            automationId: a.id,
-            kind: 'liquidity',
-            status: 'triggered',
-            message: `${pair} now has live liquidity`,
-          });
-        }
-        continue;
+      } else if (hit && !a.triggered) {
+        patches.set(a.id, {
+          ...(patches.get(a.id) ?? {}),
+          triggered: true,
+          triggeredAt: new Date().toISOString(),
+        });
+        report.triggered++;
+        report.details.push(`alert ${a.name}: ${a.symbol} ${price} ${a.op} ${a.valueUsd}`);
+        await appendLog(owner, {
+          automationId: a.id,
+          kind: 'alert',
+          status: 'triggered',
+          message: `${a.symbol} at $${price} (${a.op} $${a.valueUsd})`,
+        });
       }
+      continue;
+    }
 
-      // Recurring swap. The pair's live liquidity is refreshed every run so
-      // the card always says the truth, not the last run's news.
-      const probe = await probePairLiquidity(a.fromToken, a.toToken, a.amount).catch(
+    if (a.kind === 'liquidity') {
+      const probe = await probePairLiquidity(a.fromToken, a.toToken, '1').catch(
         () => null,
       );
-      if (probe) {
-        patches.set(a.id, {
-          ...(patches.get(a.id) ?? {}),
-          liquidity: { state: probe.state, at: new Date().toISOString(), ...(probe.estimate ? { estimate: probe.estimate } : {}) },
-        });
-      }
-
-      const due = new Date(a.nextRunAt).getTime() <= now;
-      if (!due) {
-        report.skipped++;
-        continue;
-      }
-
-      const remaining = await capRemainingUsd(owner);
-      if (remaining <= 0) {
-        patches.set(a.id, {
-          ...(patches.get(a.id) ?? {}),
-          lastRunAt: new Date().toISOString(),
-          lastStatus: 'skipped',
-          lastMessage: 'daily cap reached',
-          nextRunAt: nextRunAt(a.everyMinutes, now),
-        });
-        report.skipped++;
-        continue;
-      }
-
-      // No executable quote: nothing to sign. Skip this cycle and say why —
-      // do not leave a pending card that can never be approved.
-      if (probe?.state !== 'quoted') {
-        const pair = await pairLabel(a.fromToken, a.toToken);
-        const est = probe?.estimate ? ` · est ≈ ${probe.estimate}` : '';
-        patches.set(a.id, {
-          ...(patches.get(a.id) ?? {}),
-          lastRunAt: new Date().toISOString(),
-          lastStatus: 'skipped',
-          lastMessage: `no live liquidity for ${pair}${est} — retrying`,
-          nextRunAt: nextRunAt(a.everyMinutes, now),
-        });
-        report.skipped++;
-        continue;
-      }
-
-      const proposal = newPendingTrade({
-        kind: 'swap',
-        fromToken: a.fromToken,
-        toToken: a.toToken,
-        amount: a.amount,
-        affinity: 'from',
-      });
-      await savePending(owner, proposal);
-
+      const at = new Date().toISOString();
+      const pair = await pairLabel(a.fromToken, a.toToken);
       patches.set(a.id, {
         ...(patches.get(a.id) ?? {}),
-        lastRunAt: new Date().toISOString(),
-        lastStatus: 'proposed',
-        lastMessage: 'waiting for your approval in the app',
-        nextRunAt: nextRunAt(a.everyMinutes, now),
+        lastCheckedAt: at,
+        lastState: probe?.state ?? 'unknown',
       });
-      report.proposed++;
-      report.details.push(`recurring ${a.name}: proposed ${a.amount} ${a.fromToken} -> ${a.toToken} — approve it in the app`);
-      await appendLog(owner, {
-        automationId: a.id,
-        kind: 'recurring',
-        status: 'proposed',
-        message: `${a.amount} ${a.fromToken} -> ${a.toToken} — waiting for approval`,
+
+      if (probe?.state === 'quoted' && (a.armed ?? true)) {
+        patches.set(a.id, {
+          ...(patches.get(a.id) ?? {}),
+          armed: false,
+          lastFiredAt: at,
+        });
+        report.triggered++;
+        report.details.push(`liquidity ${a.name}: ${pair} now has live quotes`);
+        await appendLog(owner, {
+          automationId: a.id,
+          kind: 'liquidity',
+          status: 'triggered',
+          message: `${pair} now has live liquidity`,
+        });
+      }
+      continue;
+    }
+
+    // Recurring swap. The pair's live liquidity is refreshed every run so
+    // the card always says the truth, not the last run's news.
+    const probe = await probePairLiquidity(a.fromToken, a.toToken, a.amount).catch(
+      () => null,
+    );
+    if (probe) {
+      patches.set(a.id, {
+        ...(patches.get(a.id) ?? {}),
+        liquidity: { state: probe.state, at: new Date().toISOString(), ...(probe.estimate ? { estimate: probe.estimate } : {}) },
       });
     }
 
-    await patchAutomations(owner, patches);
+    const due = new Date(a.nextRunAt).getTime() <= now;
+    if (!due) {
+      report.skipped++;
+      continue;
+    }
+
+    const remaining = await capRemainingUsd(owner);
+    if (remaining <= 0) {
+      patches.set(a.id, {
+        ...(patches.get(a.id) ?? {}),
+        lastRunAt: new Date().toISOString(),
+        lastStatus: 'skipped',
+        lastMessage: 'daily cap reached',
+        nextRunAt: nextRunAt(a.everyMinutes, now),
+      });
+      report.skipped++;
+      continue;
+    }
+
+    // No executable quote: nothing to sign. Skip this cycle and say why —
+    // do not leave a pending card that can never be approved.
+    if (probe?.state !== 'quoted') {
+      const pair = await pairLabel(a.fromToken, a.toToken);
+      const est = probe?.estimate ? ` · est ≈ ${probe.estimate}` : '';
+      patches.set(a.id, {
+        ...(patches.get(a.id) ?? {}),
+        lastRunAt: new Date().toISOString(),
+        lastStatus: 'skipped',
+        lastMessage: `no live liquidity for ${pair}${est} — retrying`,
+        nextRunAt: nextRunAt(a.everyMinutes, now),
+      });
+      report.skipped++;
+      continue;
+    }
+
+    const proposal = newPendingTrade({
+      kind: 'swap',
+      fromToken: a.fromToken,
+      toToken: a.toToken,
+      amount: a.amount,
+      affinity: 'from',
+    });
+    await savePending(owner, proposal);
+
+    patches.set(a.id, {
+      ...(patches.get(a.id) ?? {}),
+      lastRunAt: new Date().toISOString(),
+      lastStatus: 'proposed',
+      lastMessage: 'waiting for your approval in the app',
+      nextRunAt: nextRunAt(a.everyMinutes, now),
+    });
+    report.proposed++;
+    report.details.push(`recurring ${a.name}: proposed ${a.amount} ${a.fromToken} -> ${a.toToken} — approve it in the app`);
+    await appendLog(owner, {
+      automationId: a.id,
+      kind: 'recurring',
+      status: 'proposed',
+      message: `${a.amount} ${a.fromToken} -> ${a.toToken} — waiting for approval`,
+    });
   }
 
+  await patchAutomations(owner, patches);
+}
   // Keep the watchlist prices fresh even when nobody has the UI open.
   for (const owner of owners) {
     try {
