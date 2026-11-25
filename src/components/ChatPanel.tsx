@@ -69,7 +69,7 @@ export default function ChatPanel({
     }),
   });
 
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, sendMessage, stop, status, error } = useChat({
     transport,
     messages: initialMessages,
     onFinish: ({ messages: finished }) => {
@@ -157,7 +157,7 @@ export default function ChatPanel({
                     {m.role === 'user' ? (
                       <div className="flex gap-2">
                         <span className="text-purple-400 select-none">&gt;</span>
-                        <span className="text-[#F7F7F7] whitespace-pre-wrap break-words">
+                        <span className="min-w-0 text-[#F7F7F7] whitespace-pre-wrap break-words">
                           {m.parts
                             .filter((p) => p.type === 'text')
                             .map((p) => (p as { text: string }).text)
@@ -173,7 +173,7 @@ export default function ChatPanel({
                             return (
                               <div key={i} className="flex gap-2">
                                 <span className="text-emerald-500 select-none">◆</span>
-                                <span className="text-zinc-200 whitespace-pre-wrap break-words">{txt}</span>
+                                <span className="min-w-0 text-zinc-200 whitespace-pre-wrap break-words">{txt}</span>
                               </div>
                             );
                           }
@@ -317,17 +317,31 @@ export default function ChatPanel({
                 {modelLabel ? ` · ${modelLabel}` : ' · no model configured'}
                 {cap ? ` · cap $${cap.spentUsd.toFixed(0)}/$${cap.capUsd.toFixed(0)}` : ''}
               </span>
-              <button
-                type="submit"
-                disabled={loading || !input.trim()}
-                aria-label="send"
-                className="shrink-0 h-9 w-9 rounded-full bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-30 disabled:hover:bg-[#4C1D95] text-white flex items-center justify-center transition"
-              >
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 19V5" />
-                  <path d="m5 12 7-7 7 7" />
-                </svg>
-              </button>
+              {loading ? (
+                <button
+                  type="button"
+                  onClick={() => stop()}
+                  aria-label="stop"
+                  title="stop"
+                  className="shrink-0 h-9 w-9 rounded-full bg-red-900/70 hover:bg-red-800 text-white flex items-center justify-center transition"
+                >
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim()}
+                  aria-label="send"
+                  className="shrink-0 h-9 w-9 rounded-full bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-30 disabled:hover:bg-[#4C1D95] text-white flex items-center justify-center transition"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 19V5" />
+                    <path d="m5 12 7-7 7 7" />
+                  </svg>
+                </button>
+              )}
             </div>
           </form>
         </div>

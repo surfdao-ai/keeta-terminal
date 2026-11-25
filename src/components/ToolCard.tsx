@@ -205,7 +205,7 @@ export default function ToolCard({ name, state, input, output, onConfirm }: Tool
         <span className="text-purple-400 select-none">&gt;</span>
         <span className="text-zinc-400">exec {label}</span>
         {input !== undefined && input !== null && Object.keys(input as object).length > 0 && (
-          <span className="text-zinc-600 truncate">
+          <span className="min-w-0 truncate break-all">
             {Object.entries(input as Record<string, unknown>)
               .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
               .join(' ')}
@@ -256,7 +256,7 @@ export default function ToolCard({ name, state, input, output, onConfirm }: Tool
       {summary && name !== 'get_portfolio' && name !== 'get_positions' && (
         <div className="ml-4 pl-3 border-l border-zinc-800 text-zinc-400">
           <div className="flex items-start gap-2">
-            <span className="break-words">{summary}</span>
+            <span className="min-w-0 break-words">{summary}</span>
             <button
               onClick={() => setShowRaw((v) => !v)}
               className="ml-auto shrink-0 text-[10px] text-zinc-600 hover:text-zinc-400"

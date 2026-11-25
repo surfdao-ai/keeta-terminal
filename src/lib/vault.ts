@@ -210,8 +210,16 @@ function prfBytes(results: PrfResults | undefined): Uint8Array | null {
  * Whether this browser can derive a key from a passkey (WebAuthn PRF).
  *
  * Only some engines expose `getClientCapabilities` (Chrome). Where it is
- * missing the answer is genuinely unknown, so callers must be ready for the
+ * missing the answer is generally unknown, so callers must be ready for the
  * passkey path to fail — see PrfUnsupportedError.
+ *
+ * One engine is a known "no" without that API: Apple WebKit (Safari on
+ * iOS/macOS, and the WebKit-based shells on iPhone) accepts the PRF
+ * extension but never returns its output, so a passkey vault created there
+ * could never be opened again. Rather than let the user register a
+ * passkey, get the Touch ID prompt and only then hit PrfUnsupportedError,
+ * we demote the answer for Apple WebKit up front. Revisit if WebKit ever
+ * reports PRF capabilities.
  */
 export async function prfSupport(): Promise<PrfSupport> {
   if (typeof window === 'undefined' || !window.PublicKeyCredential) return 'no';
@@ -226,6 +234,7 @@ export async function prfSupport(): Promise<PrfSupport> {
   } catch {
     /* getClientCapabilities is optional — the answer stays unknown */
   }
+  if (navigator.vendor === 'Apple Computer, Inc.') return 'no';
   return 'unknown';
 }
 
