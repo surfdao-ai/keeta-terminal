@@ -166,6 +166,17 @@ browser.
 
 The key is stored only in your browser (localStorage) and sent per request — never persisted server-side. You can reopen setup anytime via the "Model setup" button.
 
+### Find free providers
+
+At the top of Model setup there is a **"Find free providers"** button. It runs a live probe of a curated list of free-inference providers and ranks the results in two groups:
+
+- **works now — no key** — probed with a real minimal chat request, so a hit genuinely answers right now with no account.
+- **free key required** — reachable, but needs a free account key (a future key can't be verified ahead of time, and the UI says so).
+
+Dead providers are listed collapsed at the bottom with the reason. Tapping **use** on a result fills in the base URL and model so it saves like any other preset.
+
+The result is session-only (nothing is cached server-side), and the scan is rate-limited to a few runs per minute. The candidate list lives in **`src/lib/providers/scan.ts`** — that is the single file to edit when a provider appears, dies, or changes its free tier (it decays monthly; the probe is what keeps the UI honest about it).
+
 Open http://localhost:3000, create or import a wallet (the seed is generated in your browser — write it down), unlock it, and sign in. Then ask:
 
 - "what's my portfolio?"

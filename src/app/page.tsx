@@ -13,6 +13,7 @@ import SkillsBrowser from '@/components/SkillsBrowser';
 import Positions from '@/components/Positions';
 import { readVault } from '@/lib/vault';
 import { apiFetch } from '@/lib/client/api';
+import type { ScanResult } from '@/lib/providers/scan';
 import { latestNewAlert, type AlertLogEntry } from '@/lib/agent/alerts';
 import { signSwapBlock } from '@/lib/keeta/browser-signer';
 import type { TradeIntent } from '@/lib/keeta/trade-types';
@@ -136,6 +137,43 @@ function TrashIcon({ className = 'w-3.5 h-3.5' }: { className?: string }) {
   );
 }
 
+/** One row in the free-provider scan result: name, model, and a Use button. */
+function FreeResultRow({
+  p,
+  tag,
+  onUse,
+}: {
+  p: { label: string; defaultModel: string; detail: string; tier: string; keyUrl?: string };
+  tag?: string;
+  onUse: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg bg-[#141416] border border-zinc-800 px-2.5 py-2">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="font-mono text-[12px] text-zinc-100 truncate">{p.label}</span>
+          {p.tier === 'key' && (
+            <span className="shrink-0 text-[9px] font-mono uppercase tracking-wider text-zinc-500 border border-zinc-700 rounded px-1">
+              free key
+            </span>
+          )}
+        </div>
+        <div className="font-mono text-[10px] text-zinc-500 truncate" title={p.defaultModel}>
+          {p.defaultModel}
+          {tag ? ` · ${tag}` : ''}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onUse}
+        className="shrink-0 px-2.5 py-1 rounded-md bg-[#4C1D95] hover:bg-purple-700 text-[11px] font-medium text-white"
+      >
+        use
+      </button>
+    </div>
+  );
+}
+
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: 'chat', label: 'Chat', icon: '💬' },
   { id: 'wallet', label: 'Wallet', icon: '👛' },
@@ -159,6 +197,11 @@ export default function Home() {
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState('');
+
+  // Free-provider discovery: on-demand scan of the curated candidate list.
+  const [scan, setScan] = useState<ScanResult | null>(null);
+  const [scanRunning, setScanRunning] = useState(false);
+  const [scanError, setScanError] = useState('');
 
   const [view, setView] = useState<View>('chat');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -486,6 +529,56 @@ export default function Home() {
     saveCfg(null);
     setSetupRequested(true);
     setSetupDismissed(false);
+  }
+
+  /**
+   * Run the free-provider scan. Session-only: the result lives in this
+   * browser's state until the user picks a provider, which is saved like
+   * any other preset.
+   */
+  async function runFreeScan() {
+    setScanRunning(true);
+    setScanError('');
+    // The server-side probes are each capped at ~12s and run in parallel, so a
+    // healthy scan returns in seconds. A 60s client abort keeps the button from
+    // hanging forever if the server is wedged.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 60_000);
+    try {
+      const r = await apiFetch('/api/providers/free', { method: 'POST', signal: ctrl.signal });
+      const j = await r.json();
+      if (!r.ok || j.error) {
+        setScanError(j.error ?? 'the scan failed');
+        return;
+      }
+      setScan(j);
+      setNotice('free providers checked — the working ones are at the top');
+    } catch (e) {
+      const aborted = e instanceof Error && e.name === 'AbortError';
+      setScanError(aborted ? 'the scan took too long — try again' : (e as Error).message);
+    } finally {
+      clearTimeout(timer);
+      setScanRunning(false);
+    }
+  }
+
+  /** A scan hit becomes the saved provider — one tap to switch. */
+  function useFreeResult(p: { label: string; baseUrl: string; defaultModel: string; tier: string; note?: string }) {
+    setPresetId('custom');
+    setBaseUrl(p.baseUrl);
+    setModel(p.defaultModel);
+    setApiKey('');
+    setModelOptions([]);
+    setModelsError('');
+    if (p.tier === 'key') {
+      setModelsError('Free key required — paste it in the API key field, then save.');
+    }
+    void loadModels({ baseUrl: p.baseUrl, apiKey: '', presetId: 'custom' });
+    setNotice(
+      p.tier === 'no-key'
+        ? `${p.label} selected — press "Save & close" to use it`
+        : `${p.label} selected — paste your free key, then "Save & close"`,
+    );
   }
 
 
@@ -874,6 +967,74 @@ export default function Home() {
                 <h2 className="text-xl font-bold">Model setup</h2>
                 <p className="text-xs text-zinc-500">Choose a provider and paste your key. Stored only in your browser.</p>
               </div>
+            </div>
+
+            {/* free-provider discovery — first stop for anyone whose model died */}
+            <div className="rounded-xl border border-zinc-800 bg-[#0d0d10] p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void runFreeScan()}
+                  disabled={scanRunning}
+                  className="px-3 py-1.5 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-50 text-[12px] font-medium text-white"
+                >
+                  {scanRunning ? 'probing providers…' : scan ? 're-scan for free providers' : 'find free providers'}
+                </button>
+                <span className="text-[11px] text-zinc-500 leading-tight">
+                  live check — a working one sets up in one tap
+                </span>
+              </div>
+
+              {scanError && <p className="text-[11px] text-amber-400 font-mono">{scanError}</p>}
+
+              {scan && (
+                <div className="space-y-2">
+                  {scan.working.length > 0 && (
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 mb-1">
+                        works now — no key
+                      </div>
+                      <div className="space-y-1">
+                        {scan.working.map((p) => (
+                          <FreeResultRow key={p.id} p={p} tag={p.note} onUse={() => useFreeResult(p)} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {scan.keyRequired.length > 0 && (
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 mb-1">
+                        free key required
+                      </div>
+                      <div className="space-y-1">
+                        {scan.keyRequired.map((p) => (
+                          <FreeResultRow key={p.id} p={p} tag={p.note} onUse={() => useFreeResult(p)} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {scan.working.length === 0 && scan.keyRequired.length === 0 && (
+                    <p className="text-[11px] text-amber-400 font-mono">
+                      nothing free answered right now — a provider is always one deploy away; try again later.
+                    </p>
+                  )}
+                  {scan.down.length > 0 && (
+                    <details className="pt-1">
+                      <summary className="text-[10px] font-mono text-zinc-600 cursor-pointer select-none">
+                        {scan.down.length} not working right now
+                      </summary>
+                      <div className="mt-1 space-y-0.5">
+                        {scan.down.map((p) => (
+                          <div key={p.id} className="font-mono text-[10px] text-zinc-600 flex justify-between gap-2">
+                            <span>{p.label}</span>
+                            <span className="text-zinc-700">{p.detail}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-2">
