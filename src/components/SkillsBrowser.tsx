@@ -14,7 +14,8 @@ export default function SkillsBrowser() {
   const [filter, setFilter] = useState('');
   const [open, setOpen] = useState<{ id: string; content: string } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [openError, setOpenError] = useState('');
   const [err, setErr] = useState('');
 
   const load = useCallback(async () => {
@@ -50,18 +51,28 @@ export default function SkillsBrowser() {
   }, [skills, filter]);
 
   async function openSkill(id: string) {
-    setBusy(true);
+    setLoadingId(id);
+    setOpenError('');
+    // A fetch takes a beat (MCP round trip). Keep whatever is open visible
+    // while the next skill loads — a blank panel reads as a dead click.
+    setOpen((cur) => (cur ? cur : { id, content: '' }));
     try {
       const r = await apiFetch('/api/skills', {
         method: 'POST',
         json: { id },
       });
       const j = await r.json();
-      setOpen({ id, content: j.content ?? j.error ?? '(empty)' });
+      if (j.error) {
+        setOpen({ id, content: '' });
+        setOpenError(j.error);
+      } else {
+        setOpen({ id, content: j.content ?? '(empty)' });
+      }
     } catch (e) {
-      setErr((e as Error).message);
+      setOpen({ id, content: '' });
+      setOpenError((e as Error).message);
     } finally {
-      setBusy(false);
+      setLoadingId(null);
     }
   }
 
@@ -89,12 +100,15 @@ export default function SkillsBrowser() {
             <button
               key={s.id}
               onClick={() => openSkill(s.id)}
-              disabled={busy}
+              disabled={loadingId !== null}
               className="w-full text-left bg-[#141416] border border-zinc-800 rounded-lg px-3 py-2.5 hover:border-purple-700/70 transition disabled:opacity-50"
             >
               <div className="flex items-baseline gap-2">
                 <span className="font-mono text-[13px] text-zinc-100">{s.title}</span>
                 <span className="font-mono text-[10px] text-zinc-600">{s.id}</span>
+                {loadingId === s.id && (
+                  <span className="ml-auto font-mono text-[10px] text-purple-400 animate-pulse">reading…</span>
+                )}
               </div>
               <p className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2">{s.description}</p>
             </button>
@@ -107,16 +121,26 @@ export default function SkillsBrowser() {
         <div className="mt-6 bg-[#0d0d10] border border-zinc-800 rounded-lg overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-2 bg-[#141416] border-b border-zinc-800">
             <span className="font-mono text-[12px] text-zinc-300">{open.id}</span>
+            {openError && <span className="text-[11px] text-red-400">{openError}</span>}
             <button
-              onClick={() => setOpen(null)}
+              onClick={() => {
+                setOpen(null);
+                setOpenError('');
+              }}
               className="ml-auto font-mono text-[11px] text-zinc-500 hover:text-zinc-200"
             >
               close
             </button>
           </div>
-          <pre className="p-4 font-mono text-[11px] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words">
-            {open.content}
-          </pre>
+          {loadingId === open.id && !open.content ? (
+            <p className="p-4 font-mono text-[11px] text-zinc-500">
+              reading<span className="animate-pulse">_</span>
+            </p>
+          ) : (
+            <pre className="p-4 font-mono text-[11px] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words">
+              {open.content}
+            </pre>
+          )}
         </div>
       )}
     </div>
