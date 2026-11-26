@@ -46,6 +46,8 @@ export interface TradeIntent {
   /** Where to POST the signed block. */
   createExchangeUrl: string;
   summary: TradeSummary;
+  /** Free-read warnings/all-clear computed before the user confirms. */
+  preflight?: PreflightResult | null;
   /** Set for proposals that came from an automation (signed with the automation key). */
   fromAutomation?: boolean;
 }
@@ -58,4 +60,19 @@ export interface LaunchRecord {
   supply: string;
   decimals: number;
   at: string;
+}
+
+/** One free-read check the preflight runs before the user confirms a trade. */
+export interface PreflightCheck {
+  id: 'kta' | 'provider' | 'cap';
+  level: 'ok' | 'warn' | 'skip';
+  /** A short human-facing fragment, e.g. "KTA +1.8%/24h". */
+  text: string;
+}
+
+export interface PreflightResult {
+  level: 'ok' | 'warn';
+  checks: PreflightCheck[];
+  /** The pre-rendered one-liner shown on the confirm card. */
+  line: string;
 }

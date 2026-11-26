@@ -39,6 +39,16 @@ export default function TradeConfirm({ intent, signing, onSign, onCancel }: Trad
             </span>
             <span>fee ~${intent.summary.costUsd.toFixed(2)}</span>
           </div>
+          {intent.preflight && (
+            <div
+              className={`pt-2 border-t border-zinc-800/80 font-mono text-[11px] ${
+                intent.preflight.level === 'warn' ? 'text-amber-400' : 'text-zinc-500'
+              }`}
+              title={intent.preflight.checks.map((c) => `[${c.level}] ${c.text}`).join('\n')}
+            >
+              {intent.preflight.line}
+            </div>
+          )}
         </div>
         <p className="text-[11px] text-zinc-500 mt-2">
           Signed in this browser and sent to the provider. Nothing is signed until you approve.

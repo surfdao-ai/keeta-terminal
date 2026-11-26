@@ -15,6 +15,7 @@ import { ephemeralAccount } from './ephemeral';
 import { probePairLiquidity } from './liquidity';
 import { pickBestQuoteIndex } from './quote-routing';
 import { routeKind, routeLabel } from './routes';
+import { runPreflight } from './preflight';
 import type { TradeIntent } from './trade-types';
 
 export type { TradeIntent, TradeSummary } from './trade-types';
@@ -186,6 +187,16 @@ export async function buildSwapIntent(
   const fromAddress = (await resolveTokenAddress(pending.fromToken)) ?? pending.fromToken;
   const toAddress = (await resolveTokenAddress(pending.toToken)) ?? pending.toToken;
 
+  // Free preflight reads → one advisory line on the confirm card. Never throws
+  // (runPreflight degrades to skips), so a flaky read can't block a trade.
+  const preflight = await runPreflight({
+    owner,
+    fromSymbol: await tokenSymbol(pending.fromToken),
+    toSymbol: await tokenSymbol(pending.toToken),
+    providerId,
+    costUsd,
+  });
+
   const intent: TradeIntent = {
     tradeId,
     kind: 'swap',
@@ -211,6 +222,7 @@ export async function buildSwapIntent(
       costUsd,
       route,
     },
+    preflight,
   };
 
   if (!intent.createExchangeUrl) {
