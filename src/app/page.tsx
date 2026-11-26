@@ -17,7 +17,7 @@ import { readVault } from '@/lib/vault';
 import { apiFetch } from '@/lib/client/api';
 import type { ScanResult } from '@/lib/providers/scan';
 import { latestNewAlert, type AlertLogEntry } from '@/lib/agent/alerts';
-import { signSwapBlock, signAndPublishTokenLaunch, type LaunchSpec } from '@/lib/keeta/browser-signer';
+import { signSwapBlock, signAndPublishTokenLaunch, signPaymentBlock, type LaunchSpec } from '@/lib/keeta/browser-signer';
 import { capAlertDecision } from '@/lib/cap-alert';
 import type { TradeIntent } from '@/lib/keeta/trade-types';
 
@@ -228,12 +228,23 @@ export default function Home() {
   const [automationSeed, setAutomationSeed] = useState<string | null>(null);
   /** Whether we have asked the server whether a session exists. */
   const [sessionChecked, setSessionChecked] = useState(false);
-  const [state, setState] = useState<{ balances: { token: string; display: string }[]; cap: { spentUsd: number; capUsd: number } } | null>(null);
+  const [state, setState] = useState<{
+    balances: { token: string; display: string }[];
+    cap: { spentUsd: number; capUsd: number };
+    dataCap?: { spentUsd: number; capUsd: number };
+  } | null>(null);
   const [capDraft, setCapDraft] = useState<string | null>(null);
   // The input follows the stored cap until the user edits it.
   const capInput = capDraft ?? (state?.cap?.capUsd !== undefined ? String(state.cap.capUsd) : '100');
   const [capSaving, setCapSaving] = useState(false);
   const [capMsg, setCapMsg] = useState('');
+  // The paid-data-read budget (Settings): the input follows the stored value
+  // until the user edits it, same as the trade cap.
+  const [dataCapDraft, setDataCapDraft] = useState<string | null>(null);
+  const dataCapInput =
+    dataCapDraft ?? (state?.dataCap?.capUsd !== undefined ? String(state.dataCap.capUsd) : '1');
+  const [dataCapSaving, setDataCapSaving] = useState(false);
+  const [dataCapMsg, setDataCapMsg] = useState('');
   const [notice, setNotice] = useState('');
   const [alertBanner, setAlertBanner] = useState<{ text: string; at: string; kind: string } | null>(null);
   // The newest alert-trigger we have already announced, so a page load does not
@@ -394,6 +405,27 @@ export default function Home() {
       setCapMsg(`err  ${(err as Error).message}`);
     } finally {
       setCapSaving(false);
+    }
+  }
+
+  async function saveDataCap(e: React.FormEvent) {
+    e.preventDefault();
+    setDataCapSaving(true);
+    setDataCapMsg('');
+    try {
+      const r = await apiFetch('/api/settings', {
+        method: 'POST',
+        json: { dataCapUsd: Number(dataCapInput) },
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'failed');
+      setDataCapMsg('ok  data cap updated');
+      setDataCapDraft(null);
+      await refresh();
+    } catch (err) {
+      setDataCapMsg(`err  ${(err as Error).message}`);
+    } finally {
+      setDataCapSaving(false);
     }
   }
 
@@ -673,6 +705,44 @@ export default function Home() {
   }
 
   /**
+   * A paid data read: the user approved the card. Sign the USDC send block in
+   * the browser (seed stays here) and hand only the block to the server, which
+   * retries the paid URL with it.
+   */
+  async function signAndSubmitDataPayment(paymentId: string, setter: (r: unknown) => void) {
+    setTradeSigning(true);
+    try {
+      if (!seed) throw new Error('The wallet is locked — unlock it to sign.');
+      const r = await apiFetch('/api/data-pay', {
+        method: 'POST',
+        json: { paymentId },
+      });
+      const j = (await r.json()) as {
+        requirement?: { payTo: string; amount: string; asset: string };
+        error?: string;
+      };
+      if (!r.ok || !j.requirement) throw new Error(j.error ?? 'Could not load the payment.');
+      const signedBlock = await signPaymentBlock(
+        j.requirement.payTo,
+        j.requirement.amount,
+        j.requirement.asset,
+        seed,
+      );
+      const s = await apiFetch('/api/data-pay/submit', {
+        method: 'POST',
+        json: { paymentId, signedBlock },
+      });
+      const sj = await s.json();
+      setter(sj);
+      await refresh();
+    } catch (e) {
+      setter({ error: (e as Error).message });
+    } finally {
+      setTradeSigning(false);
+    }
+  }
+
+  /**
    * Launchpad quick-buy: create a pending swap (USDC → token) on the server,
    * then run the exact same prepare → confirm → sign flow as a chat trade.
    * The buy source is always USDC (the stable the wallet actually holds); the
@@ -884,6 +954,7 @@ export default function Home() {
             modelLabel={cfg ? cfg.model : ''}
             onSaved={handleChatSaved}
             onConfirm={prepareTrade}
+            onConfirmData={signAndSubmitDataPayment}
           />
         )}
 
@@ -1030,6 +1101,37 @@ export default function Home() {
                 <p className="text-[11px] text-zinc-600">
                   Enforced in code before any swap is signed. Raise it with care — every trade still needs manual confirmation.
                 </p>
+              </form>
+              <div className="pt-3 border-t border-zinc-800/80">
+                <div className="text-xs text-zinc-400">
+                  Data-read cap (USDC) —{' '}
+                  ${state?.dataCap?.spentUsd?.toFixed(2) ?? '0.00'} spent of{' '}
+                  ${state?.dataCap?.capUsd ?? 1} today
+                </div>
+                <p className="mt-1 text-[11px] text-zinc-600">
+                  Daily budget for paid KeeSpecs reads (0.01–0.02 USDC each, e.g. ledger status, KTA price
+                  comparison, throughput). Separate from the trade cap. Default $1.
+                </p>
+              </div>
+              <form onSubmit={saveDataCap} className="flex flex-col gap-2">
+                <label className="text-xs text-zinc-400">Daily data-read cap (USD)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.5"
+                    value={dataCapInput}
+                    onChange={(e) => setDataCapDraft(e.target.value)}
+                    className="flex-1 px-3 py-2.5 rounded-lg bg-[#09090B] border border-zinc-700 font-mono text-sm focus:outline-none focus:border-purple-600"
+                  />
+                  <button
+                    disabled={dataCapSaving}
+                    className="px-4 py-2 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-50 text-sm font-medium text-white"
+                  >
+                    {dataCapSaving ? '...' : 'Save'}
+                  </button>
+                </div>
+                {dataCapMsg && <p className={`font-mono text-[11px] ${dataCapMsg.startsWith('ok') ? 'text-emerald-400' : 'text-red-400'}`}>{dataCapMsg}</p>}
               </form>
             </div>
           </div>

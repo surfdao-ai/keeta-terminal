@@ -8,6 +8,14 @@ import { tokenDecimals } from '../keeta/currencies';
 import { routeKind, routeLabel } from '../keeta/routes';
 import { newPendingTrade, savePending, listTrades, capSpent, dailyCapUsd } from './safety';
 import { validateTokenSpec } from '../keeta/tokens';
+import {
+  saveDataPayment,
+  validateRequirement,
+  validatePayUrl,
+  priceUsdOf,
+  dataCapState,
+  type PaymentRequirement,
+} from '../x402/paid-reads';
 
 export interface ToolContext {
   /** The signed-in wallet address. No key material is ever passed to the server. */
@@ -314,10 +322,64 @@ export function buildTools(ctx: ToolContext) {
       execute: async () => {
         const cap = await dailyCapUsd(ctx.owner);
         const spent = await capSpent(ctx.owner);
+        const data = await dataCapState(ctx.owner);
         return {
           spentUsd: spent,
           capUsd: cap,
           remainingUsd: Math.max(0, cap - spent),
+          dataCap: data,
+        };
+      },
+    }),
+
+    propose_data_payment: tool({
+      description:
+        'Propose paying for a paid KeeSpecs read (0.01-0.02 USDC). Use this when a ks_ quote_* tool returned a payment requirement (payUrl + accepts) and the user wants that data. Does NOT pay — the user confirms in the UI. Pass the requirement exactly as the quote tool returned it.',
+      inputSchema: z.object({
+        payUrl: z.string().url().describe('The paid URL, from the quote tool\'s payUrl field.'),
+        label: z.string().describe('What the read is, in short words, e.g. "ledger status" or "KTA price comparison".'),
+        requirement: z
+          .object({
+            scheme: z.string(),
+            network: z.string(),
+            amount: z.string(),
+            asset: z.string(),
+            payTo: z.string(),
+          })
+          .describe('The payment requirement, from the quote tool\'s accepts[0].'),
+      }),
+      execute: async ({ payUrl, label, requirement }) => {
+        const badUrl = validatePayUrl(payUrl);
+        if (badUrl) return { error: badUrl, paymentRequired: true };
+        const invalid = validateRequirement(requirement as PaymentRequirement);
+        if (invalid) return { error: invalid, paymentRequired: true };
+        const priceUsd = priceUsdOf(requirement as PaymentRequirement);
+        const data = await dataCapState(ctx.owner);
+        if (data.remainingUsd < priceUsd) {
+          return {
+            paymentRequired: true,
+            error: `Daily data cap reached: $${data.spentUsd.toFixed(2)} of $${data.capUsd} used. Raise it in Settings.`,
+            cap: data,
+          };
+        }
+        const pending = {
+          id: crypto.randomUUID(),
+          payUrl,
+          label,
+          requirement: requirement as PaymentRequirement,
+          priceUsd,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 120_000,
+        };
+        await saveDataPayment(ctx.owner, pending);
+        return {
+          dataPaymentId: pending.id,
+          expiresAt: pending.expiresAt,
+          label,
+          priceUsd,
+          requirement: pending.requirement,
+          cap: data,
+          note: 'The user will be asked to confirm before any USDC is sent.',
         };
       },
     }),

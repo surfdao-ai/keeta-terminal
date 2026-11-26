@@ -76,6 +76,37 @@ export async function signSwapBlock(intent: TradeIntent, seed: string): Promise<
   return toBase64(new Uint8Array(blocks.blocks[0].toBytes()));
 }
 
+/**
+ * Build and sign the block for an x402 data payment.
+ *
+ * A data payment is a plain Keeta send: `amountBase` of `usdc` to `payTo`.
+ * The result is the block as the PAYMENT-SIGNATURE header needs it inside
+ * its JSON: base64 of the (signed) block bytes. The merchant's facilitator
+ * verifies and settles it; we only ever return the block to our own server.
+ */
+export async function signPaymentBlock(
+  payTo: string,
+  amountBase: string,
+  usdc: string,
+  seed: string,
+): Promise<string> {
+  const account = accountFromSeed(seed);
+  await using client = KeetaNet.UserClient.fromNetwork('main', account);
+
+  const builder = client.initBuilder();
+  builder.send(
+    publicAccount(payTo) as never,
+    BigInt(amountBase),
+    publicAccount(usdc) as never,
+  );
+  const computed = await builder.computeBlocks();
+  const block = computed.blocks[0];
+  if (!block) throw new Error('Building the payment produced no block.');
+  // toBytes(true) = include the signature — that is what the facilitator
+  // verifies. Mirrors @x402/keeta's computePaymentBlock encoding.
+  return toBase64(new Uint8Array(block.toBytes(true)));
+}
+
 export interface LaunchSpec {
   name: string;
   symbol: string;

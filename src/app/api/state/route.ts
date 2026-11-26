@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { guardRead, ownerOf } from '@/lib/auth/guard';
 import { getWallet } from '@/lib/keeta/wallet';
-import { capSpent, dailyCapUsd } from '@/lib/agent/safety';
+import { capSpent, dailyCapUsd, dataCapSpent, dataCapUsd } from '@/lib/agent/safety';
 import { readPublicBalances } from '@/lib/keeta/public-reads';
 
 /**
@@ -26,5 +26,7 @@ export async function GET(req: Request) {
     unlocked: true,
     balances,
     cap: { spentUsd: await capSpent(owner), capUsd: await dailyCapUsd(owner) },
+    // The paid-data-read budget, separate from the trade cap above.
+    dataCap: { spentUsd: await dataCapSpent(owner), capUsd: await dataCapUsd(owner) },
   });
 }

@@ -24,6 +24,7 @@ interface ChatPanelProps {
   modelLabel: string;
   onSaved: (chat: { id: string; title: string; updatedAt: string }) => void;
   onConfirm: (tradeId: string, setter: (r: unknown) => void) => void;
+  onConfirmData?: (paymentId: string, setter: (r: unknown) => void) => void;
 }
 
 /** The rotating hints that sit above the composer. Kept to about one line. */
@@ -44,6 +45,7 @@ export default function ChatPanel({
   modelLabel,
   onSaved,
   onConfirm,
+  onConfirmData,
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [tip, setTip] = useState(0);
@@ -182,6 +184,7 @@ export default function ChatPanel({
                                 input={inp}
                                 output={out}
                                 onConfirm={onConfirm}
+                                onConfirmData={onConfirmData}
                               />
                             );
                           }

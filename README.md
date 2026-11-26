@@ -13,8 +13,9 @@ An AI chat trading terminal for the Keeta Network — a bnkr.bot-style agent, bu
 - **Launchpad** — a dedicated 🚀 view to launch native Keeta tokens, browse the live token directory (Top / Trending / search), and quick-buy ($10/$25/$50/$100) — every buy runs the normal propose → confirm → sign flow
 - **Token launches** — create new native Keeta tokens from chat or the Launchpad (no contract; supply minted to creator)
 - **Automations** — price alerts (one-shot or repeat), "liquidity is back" alerts, and recurring (DCA) swaps that propose on schedule and fill when you sign; a fired alert raises a banner + chime in the app
-- Hard daily spend cap enforced in code before any block is signed
+- Hard daily spend cap enforced in code before any block is signed, plus a separate smaller daily cap for paid data reads
 - Read-only Keeta market data via KeeSpecs MCP (prices, providers, tokens, username resolution)
+- **Paid data reads (x402)** — the paid KeeSpecs reads (ledger status, KTA price comparison, throughput, …) work through the same propose → confirm → sign flow: the agent quotes the price for free, you approve, the browser signs one USDC send, and the merchant settles it
 - Trade history log
 - **PWA** — installable, offline shell, mobile-first layout
 
@@ -88,6 +89,14 @@ BASE=http://localhost:3111 npm run test:automations
 npm run test:alerts
 npm run test:vault
 npm run test:card
+# x402 paid data reads: validation units, data-cap CAS units, and the
+# endpoint e2e (state/settings/401/409 paths) — no funded wallet needed
+npm run test:x402
+npm run test:datacap
+BASE=http://localhost:3111 npm run test:data-pay
+# balance gate: seed PHASE with the server stopped, submit PHASE with it up
+# (server down → `npx tsx scripts/data-pay-balance-test.mjs`; server up →
+# `BASE=http://localhost:3111 PHASE=submit npx tsx scripts/data-pay-balance-test.mjs`)
 ```
 
 `test:security` checks that every protected route answers 401 without a
@@ -282,6 +291,54 @@ the browser — its seed is sealed in your vault and the server only learns its
 address, so it cannot move that money by itself. What that wallet holds is the
 blast radius: park only what you are willing to lose. The daily cap is checked
 in the browser before signing and again on the server.
+
+## Paid data reads (x402)
+
+Some KeeSpecs market reads are sold per call (0.01–0.02 USDC): ledger status,
+the KTA price comparison, throughput, settlement time, market regime, and the
+desk/network/convert-check bundles. They use the x402 payment protocol on
+Keeta: the paid URL answers `402 Payment Required` with its payment
+requirement, and the buyer retries the same URL with a `PAYMENT-SIGNATURE`
+header — standard base64 of `{ "block": "<base64 signed block>" }`, where the
+block is a plain Keeta USDC send to the merchant. The merchant's facilitator
+verifies the block on the ledger, settles it (about 400 ms) and pays the
+network fee; the buyer never talks to the facilitator.
+
+The terminal runs the same rule as for trades:
+
+```
+1  quote     the agent calls the free ks_quote_* MCP tool, which returns the
+             402 requirement (price, payee, asset) instead of the data
+2  propose   the agent calls propose_data_payment; the server re-validates the
+             requirement and stores it (2-minute expiry)
+3  approve   a pay card appears in the chat: exact price, payee, and how much
+             of your daily data cap is left — nothing is paid without the tap
+4  sign      the browser reads the stored requirement back from the server,
+             signs one USDC send block locally (the seed stays in the browser)
+             and posts only the block
+5  settle    the server reserves the data cap, retries the paid URL with the
+             block, stores the response, and shows it in the chat with the
+             receipt (settled block hash)
+```
+
+Safety, because the 402 body and the `payUrl` both arrive from the model
+(untrusted input):
+
+- the **payee must be the known KeeSpecs treasury** — a forged or injected 402
+  naming any other address is refused server-side;
+- the **asset must be mainnet USDC** and the **network `keeta:21378`**;
+- the **price is capped at 0.05 USDC per read**;
+- the **payUrl must be an https `keespecs.xyz` `/api/` read** — payments are
+  never sent to any other host;
+- spend is tracked against a **separate daily data cap** (default **$1**,
+  set in Settings, independent of the trade cap), reserved atomically before
+  anything is sent and refunded if the payment fails without settling.
+
+If the wallet holds no USDC the server fails closed with a readable reason
+before touching the cap; if the merchant rejects the payment the cap charge is
+given back unless the USDC demonstrably left the wallet (settled but response
+lost), in which case the card tells you not to pay again. A real settle needs
+a funded wallet, exactly like a real trade.
 
 ## Notes
 

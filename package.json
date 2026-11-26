@@ -20,7 +20,10 @@
     "test:automations": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/automations-test.mjs",
     "test:automation-wallet": "node --experimental-strip-types scripts/automation-wallet-test.mjs",
     "test:owners": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/owner-index-test.mjs",
-    "test:alerts": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/alerts-test.mjs"
+    "test:alerts": "node --experimental-strip-types --import ./scripts/alias-register.mjs scripts/alerts-test.mjs",
+    "test:x402": "tsx scripts/test-x402.mts",
+    "test:datacap": "tsx scripts/test-datacap.mts",
+    "test:data-pay": "tsx scripts/data-pay-e2e.mjs"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.143",

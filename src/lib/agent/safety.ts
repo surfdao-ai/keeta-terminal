@@ -169,8 +169,67 @@ export async function reserveCap(
   return { ok, spentUsd, capUsd: cap };
 }
 
+/* ------------------------------------------------------------------ *
+ * Data-read spend cap.
+ *
+ * Paid KeeSpecs reads are tiny (0.01–0.02 USDC) and can be called many
+ * times, so they get their own daily budget, separate from the trade cap
+ * which is for swaps. The default is deliberately low ($1 ≈ a day's worth
+ * of ~50 reads) and is raised in Settings, not by default.
+ * ------------------------------------------------------------------ */
+
+export const MAX_DATA_CAP_USD = 1_000;
+export const DEFAULT_DATA_CAP_USD = 1;
+
+/** The effective daily data-spend cap (user setting, else the low default). */
+export async function dataCapUsd(owner: string): Promise<number> {
+  const v = (await getSettings(owner)).dataCapUsd;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : DEFAULT_DATA_CAP_USD;
+}
+
+export async function dataCapSpent(owner: string): Promise<number> {
+  const v = await dbRead<{ spentUsd: number }>(dataCapKey(owner), owner);
+  return v?.spentUsd ?? 0;
+}
+
+/**
+ * Atomically check the data cap and reserve `costUsd` — the same compare-and-
+ * set used for trades, so two concurrent paid reads cannot both pass the
+ * daily limit.
+ */
+export async function reserveDataCap(
+  owner: string,
+  costUsd: number,
+): Promise<{ ok: boolean; spentUsd: number; capUsd: number }> {
+  const cap = await dataCapUsd(owner);
+  let ok = false;
+  let spentUsd = 0;
+  await dbUpdate<{ spentUsd: number }>(
+    dataCapKey(owner),
+    (current) => {
+      const next = (current?.spentUsd ?? 0) + costUsd;
+      if (next > cap) return current ?? { spentUsd: 0 };
+      ok = true;
+      spentUsd = next;
+      return { spentUsd: next };
+    },
+    { owner },
+  );
+  if (!ok) {
+    const cur = await dbRead<{ spentUsd: number }>(dataCapKey(owner), owner);
+    spentUsd = cur?.spentUsd ?? 0;
+  }
+  return { ok, spentUsd, capUsd: cap };
+}
+
+function dataCapKey(owner: string, day = new Date().toISOString().slice(0, 10)): string {
+  return `datacap:${day}`;
+}
+
 export interface TerminalSettings {
   dailyCapUsd: number;
+  /** Daily budget for paid data reads (USDC). Separate from the trade cap. */
+  dataCapUsd?: number;
   updatedAt: string;
 }
 
@@ -197,7 +256,26 @@ export async function dailyCapUsd(owner: string): Promise<number> {
 export async function setDailyCap(owner: string, usd: number): Promise<TerminalSettings> {
   if (!Number.isFinite(usd) || usd <= 0) throw new Error('Cap must be a positive number');
   if (usd > MAX_CAP_USD) throw new Error(`Cap cannot exceed $${MAX_CAP_USD.toLocaleString()}`);
-  const settings: TerminalSettings = { dailyCapUsd: usd, updatedAt: new Date().toISOString() };
+  const current = await getSettings(owner);
+  const settings: TerminalSettings = {
+    dailyCapUsd: usd,
+    dataCapUsd: current.dataCapUsd,
+    updatedAt: new Date().toISOString(),
+  };
+  await dbUpdate<TerminalSettings>('settings', () => settings, { owner });
+  return settings;
+}
+
+/** Set the daily data-read budget (USDC). */
+export async function setDataCap(owner: string, usd: number): Promise<TerminalSettings> {
+  if (!Number.isFinite(usd) || usd <= 0) throw new Error('Data cap must be a positive number');
+  if (usd > MAX_DATA_CAP_USD) throw new Error(`Data cap cannot exceed $${MAX_DATA_CAP_USD.toLocaleString()}`);
+  const current = await getSettings(owner);
+  const settings: TerminalSettings = {
+    dailyCapUsd: current.dailyCapUsd,
+    dataCapUsd: usd,
+    updatedAt: new Date().toISOString(),
+  };
   await dbUpdate<TerminalSettings>('settings', () => settings, { owner });
   return settings;
 }

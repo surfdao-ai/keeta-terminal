@@ -8,6 +8,7 @@ interface ToolCardProps {
   input?: unknown;
   output?: unknown;
   onConfirm: (tradeId: string, setter: (r: unknown) => void) => void;
+  onConfirmData?: (paymentId: string, setter: (r: unknown) => void) => void;
 }
 
 const PRETTY: Record<string, string> = {
@@ -20,6 +21,7 @@ const PRETTY: Record<string, string> = {
   check_liquidity: 'liquidity',
   propose_trade: 'propose',
   propose_token_launch: 'launch token',
+  propose_data_payment: 'pay for data read',
   get_trade_history: 'history',
   get_cap_status: 'cap',
 };
@@ -176,20 +178,37 @@ function summarize(output: unknown): string {
   return keys.slice(0, 4).join(' · ');
 }
 
-export default function ToolCard({ name, state, input, output, onConfirm }: ToolCardProps) {
+export default function ToolCard({ name, state, input, output, onConfirm, onConfirmData }: ToolCardProps) {
   const [confirmResult, setConfirmResult] = useState<unknown>(null);
   const [confirming, setConfirming] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
 
   const running = state !== 'output-available';
-  const out = output as { tradeId?: string; tokenLaunchId?: string } | null;
+  const out = output as {
+    tradeId?: string;
+    tokenLaunchId?: string;
+    dataPaymentId?: string;
+    label?: string;
+    priceUsd?: number;
+    cap?: { spentUsd: number; capUsd: number };
+  } | null;
   const actionId = out?.tradeId || out?.tokenLaunchId;
+  const isDataPayment = name === 'propose_data_payment' && Boolean(out?.dataPaymentId);
   const label = PRETTY[name] || name.replace(/^ks_/, '');
 
   async function handleConfirm() {
     if (!actionId) return;
     setConfirming(true);
     onConfirm(actionId, (r) => {
+      setConfirmResult(r);
+      setConfirming(false);
+    });
+  }
+
+  async function handlePay() {
+    if (!out?.dataPaymentId || !onConfirmData) return;
+    setConfirming(true);
+    onConfirmData(out.dataPaymentId, (r) => {
       setConfirmResult(r);
       setConfirming(false);
     });
@@ -269,6 +288,30 @@ export default function ToolCard({ name, state, input, output, onConfirm }: Tool
               {JSON.stringify(output, null, 1)}
             </pre>
           )}
+        </div>
+      )}
+
+      {/* pay action — a data payment the user has to approve before anything signs */}
+      {isDataPayment && !confirmResult && (
+        <div className="ml-4 mt-1 space-y-1">
+          <div className="flex items-center gap-3">
+            <button
+              disabled={confirming}
+              onClick={handlePay}
+              className="px-3 py-1 font-mono text-[12px] rounded bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-50 text-white"
+            >
+              {confirming
+                ? 'signing…'
+                : `[ pay ${out?.priceUsd?.toFixed(2) ?? '…'} USDC ]`}
+            </button>
+            <span className="text-[11px] text-zinc-600">expires in 2 min</span>
+          </div>
+          <div className="text-[11px] text-zinc-600">
+            paid to KeeSpecs&apos;s treasury · signed in this browser · counts against your{' '}
+            {out?.cap
+              ? `$${out.cap.capUsd.toFixed(2)} daily data cap ($${out.cap.spentUsd.toFixed(2)} used today)`
+              : 'daily data cap'}
+          </div>
         </div>
       )}
 
