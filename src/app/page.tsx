@@ -964,7 +964,9 @@ export default function Home() {
            footer buttons off-screen with no way out. min-h-full + items-center
            still centers it on desktop. */
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 overflow-y-auto overscroll-contain">
-          <div className="flex min-h-full items-center justify-center p-4">
+          {/* top padding clears the status bar / Dynamic Island on notched
+              phones; a plain p-4 (16px) sits the card header right under it */}
+          <div className="flex min-h-full items-center justify-center px-4 pt-[calc(env(safe-area-inset-top,0px)+1rem)] pb-4">
           <form onSubmit={saveSetup} className="bg-[#141416] border border-zinc-800 rounded-2xl p-6 sm:p-7 w-full max-w-lg flex flex-col gap-5 shadow-2xl">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-800 flex items-center justify-center font-bold text-white shrink-0">K</div>
