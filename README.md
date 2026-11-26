@@ -10,7 +10,8 @@ An AI chat trading terminal for the Keeta Network — a bnkr.bot-style agent, bu
 - Non-custodial wallet: the seed is held by the device (passkey or passphrase sealed), the server stores only the public address
 - **The seed never leaves the browser** — trades are proposed by the server, signed in the browser, and only the signed block is sent back
 - Atomic swaps via Keeta FX anchors (propose → confirm → sign in the browser on every trade)
-- **Token launches** — create new native Keeta tokens from chat (no contract; supply minted to creator)
+- **Launchpad** — a dedicated 🚀 view to launch native Keeta tokens, browse the live token directory (Top / Trending / search), and quick-buy ($10/$25/$50/$100) — every buy runs the normal propose → confirm → sign flow
+- **Token launches** — create new native Keeta tokens from chat or the Launchpad (no contract; supply minted to creator)
 - **Automations** — price alerts (one-shot or repeat), "liquidity is back" alerts, and recurring (DCA) swaps that propose on schedule and fill when you sign; a fired alert raises a banner + chime in the app
 - Hard daily spend cap enforced in code before any block is signed
 - Read-only Keeta market data via KeeSpecs MCP (prices, providers, tokens, username resolution)
@@ -311,6 +312,16 @@ launch a token called KTW, ticker KTW, supply 1000000, 18 decimals
 ```
 
 The agent proposes it, you confirm, and the browser signs the launch block and publishes it — the server never holds the key. The full supply is minted to your wallet, and `decimalPlaces` metadata is written so every client renders balances correctly. Creating a token needs KTA in the wallet for network fees.
+
+### The 🚀 Launchpad
+
+The **Launchpad** view (sidebar, between Trade and Automations) makes launching and trading first-class, with no fake liquidity — a token is only tradable once a Keeta FX anchor provider quotes it, and the UI says exactly that.
+
+- **Discover** — the live token directory (Top by supply, Trending by network activity, plus a search box). Data comes from KeeSpecs' free directory + KTA price feed, proxied through `/api/tokens` with a 2-minute server-side cache and each row enriched with the wallet's own balance.
+- **Quick-buy** — every token gets **$10 / $25 / $50 / $100** buttons. They do not sign anything: the button picks the source (USDC if the wallet holds some, otherwise KTA priced at the live feed), creates a pending swap, and runs the normal **prepare → confirm → sign** flow. The daily cap still applies and nothing signs without approval. A pair with no live liquidity shows the honest *"No live liquidity … est 10 USDC ≈ 225.09 KTA — try later"* state instead of a trade card.
+- **Launch** — a validated form (symbol, name, description, supply, decimals) that signs and publishes the `CREATE_IDENTIFIER` + mint + metadata from the browser (the seed never leaves the page), with a KTA fee-balance note. "Your tokens" lists what this wallet launched and survives reloads, showing whether each is live in the directory yet.
+
+The trade confirm card lives at the page level, so a quick-buy from the Launchpad reaches the same *sign and send* step as a trade proposed in chat.
 
 Regenerate PWA icons after changing `public/icon.svg`:
 
