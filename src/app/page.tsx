@@ -18,6 +18,7 @@ import { apiFetch } from '@/lib/client/api';
 import type { ScanResult } from '@/lib/providers/scan';
 import { latestNewAlert, type AlertLogEntry } from '@/lib/agent/alerts';
 import { signSwapBlock, signAndPublishTokenLaunch, type LaunchSpec } from '@/lib/keeta/browser-signer';
+import { capAlertDecision } from '@/lib/cap-alert';
 import type { TradeIntent } from '@/lib/keeta/trade-types';
 
 type ProviderConfig = {
@@ -442,6 +443,29 @@ export default function Home() {
     const t = setTimeout(() => setNotice(''), 5000);
     return () => clearTimeout(t);
   }, [notice]);
+
+  // Daily-cap warning: raise the same banner + chime the price alerts use when
+  // spend crosses 80% of the cap. The decision (hysteresis + per-day re-arm)
+  // lives in the pure capAlertDecision; this just threads its state through a
+  // ref and surfaces a crossing.
+  const capState = state?.cap;
+  const capAlertStateRef = useRef<{ armed: boolean; day: string }>({ armed: true, day: '' });
+  useEffect(() => {
+    if (!capState) return;
+    const decision = capAlertDecision(capAlertStateRef.current, {
+      spentUsd: capState.spentUsd,
+      capUsd: capState.capUsd,
+    });
+    capAlertStateRef.current = { armed: decision.armed, day: decision.day };
+    if (decision.fire) {
+      setAlertBanner({
+        text: decision.line ?? 'Daily cap reached',
+        at: new Date().toISOString(),
+        kind: 'cap',
+      });
+      alertChime();
+    }
+  }, [capState]);
 
   /** Ask the provider which models it serves and offer them in a dropdown. */
   async function loadModels(overrides?: { baseUrl?: string; apiKey?: string; presetId?: string }) {
@@ -1224,7 +1248,7 @@ export default function Home() {
           <span className="text-amber-400 text-[15px] leading-none">◈</span>
           <span className="min-w-0">
             <span className="text-amber-300/80 text-[10px] uppercase tracking-wider">
-              {alertBanner.kind === 'liquidity' ? 'liquidity back' : 'price alert'}
+              {alertBanner.kind === 'liquidity' ? 'liquidity back' : alertBanner.kind === 'cap' ? 'daily cap' : 'price alert'}
             </span>
             <span className="block truncate">{alertBanner.text}</span>
           </span>
