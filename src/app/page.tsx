@@ -959,14 +959,32 @@ export default function Home() {
       </main>
 
       {setupOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <form onSubmit={saveSetup} className="bg-[#141416] border border-zinc-800 rounded-2xl p-7 w-full max-w-lg flex flex-col gap-5 shadow-2xl">
+        /* The overlay scrolls when the panel is taller than the screen (small
+           phones, scan results open) — the old fixed flex layout clipped the
+           footer buttons off-screen with no way out. min-h-full + items-center
+           still centers it on desktop. */
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 overflow-y-auto overscroll-contain">
+          <div className="flex min-h-full items-center justify-center p-4">
+          <form onSubmit={saveSetup} className="bg-[#141416] border border-zinc-800 rounded-2xl p-6 sm:p-7 w-full max-w-lg flex flex-col gap-5 shadow-2xl">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-800 flex items-center justify-center font-bold text-white">K</div>
-              <div>
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-800 flex items-center justify-center font-bold text-white shrink-0">K</div>
+              <div className="min-w-0">
                 <h2 className="text-xl font-bold">Model setup</h2>
                 <p className="text-xs text-zinc-500">Choose a provider and paste your key. Stored only in your browser.</p>
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSetupRequested(false);
+                  setSetupDismissed(true);
+                }}
+                aria-label="close model setup"
+                className="ml-auto shrink-0 p-2 -m-2 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
             </div>
 
             {/* free-provider discovery — first stop for anyone whose model died */}
@@ -1129,6 +1147,7 @@ export default function Home() {
               <button type="submit" className="px-4 py-2 rounded-lg bg-[#4C1D95] hover:bg-purple-700 text-sm font-medium text-white">Save & close</button>
             </div>
           </form>
+          </div>
         </div>
       )}
 
