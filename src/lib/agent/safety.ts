@@ -5,6 +5,7 @@
  * never see or alter another's state.
  */
 import { dbRead, dbUpdate } from '../db';
+import type { LaunchRecord } from '../keeta/trade-types';
 
 export interface TokenLaunchSpec {
   name: string;
@@ -100,6 +101,21 @@ export async function listTrades(owner: string, limit = 50): Promise<TradeRecord
   const raw = await dbRead<TradeRecord[]>('trades', owner);
   const all = Array.isArray(raw) ? raw : [];
   return all.slice(0, limit);
+}
+
+export type { LaunchRecord } from '../keeta/trade-types';
+
+export async function appendLaunch(owner: string, rec: LaunchRecord): Promise<void> {
+  await dbUpdate<LaunchRecord[]>('launches', (current) => {
+    const all = Array.isArray(current) ? current : [];
+    all.unshift(rec);
+    return all.slice(0, 100);
+  }, { owner });
+}
+
+export async function listLaunches(owner: string): Promise<LaunchRecord[]> {
+  const raw = await dbRead<LaunchRecord[]>('launches', owner);
+  return Array.isArray(raw) ? raw : [];
 }
 
 export function capKey(owner: string, day = new Date().toISOString().slice(0, 10)): string {

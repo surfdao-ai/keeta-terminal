@@ -49,3 +49,13 @@ export interface TradeIntent {
   /** Set for proposals that came from an automation (signed with the automation key). */
   fromAutomation?: boolean;
 }
+
+/** A native token this wallet launched, kept per owner for the Launchpad. */
+export interface LaunchRecord {
+  address: string;
+  symbol: string;
+  name: string;
+  supply: string;
+  decimals: number;
+  at: string;
+}

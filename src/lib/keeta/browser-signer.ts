@@ -109,14 +109,18 @@ export async function signAndPublishTokenLaunch(
   const rawSupply = BigInt(Math.floor(Number(spec.supply) * 10 ** spec.decimals));
   builder.modifyTokenSupply(rawSupply, { account: token.account });
 
-  // 4. attributes + metadata (decimalPlaces drives display math)
+  // 4. attributes + metadata (decimalPlaces drives display math). The on-chain
+  //    `name` is what every client shows as the *symbol* (see getTokenInfo),
+  //    so it must be the ticker, not the display name — matching launchToken.
   builder.setInfo({
-    name: spec.name,
-    description: spec.description,
-    metadata: Buffer.from(
-      JSON.stringify({ decimalPlaces: spec.decimals }),
-      'utf8',
-    ).toString('base64'),
+    name: spec.symbol,
+    description: spec.description || spec.name,
+    // TextEncoder + toBase64 instead of Buffer: this runs in the browser,
+    // where Buffer is not polyfilled.
+    metadata: toBase64(
+      new TextEncoder().encode(JSON.stringify({ decimalPlaces: spec.decimals })),
+    ),
+    defaultPermission: new KeetaNet.lib.Permissions(['ACCESS'], []),
   } as never);
 
   const blocks = await builder.computeBlocks();

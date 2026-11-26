@@ -11,11 +11,13 @@ import WalletPanel from '@/components/WalletPanel';
 import SignInGate from '@/components/SignInGate';
 import SkillsBrowser from '@/components/SkillsBrowser';
 import Positions from '@/components/Positions';
+import Launchpad from '@/components/Launchpad';
+import TradeConfirm from '@/components/TradeConfirm';
 import { readVault } from '@/lib/vault';
 import { apiFetch } from '@/lib/client/api';
 import type { ScanResult } from '@/lib/providers/scan';
 import { latestNewAlert, type AlertLogEntry } from '@/lib/agent/alerts';
-import { signSwapBlock } from '@/lib/keeta/browser-signer';
+import { signSwapBlock, signAndPublishTokenLaunch, type LaunchSpec } from '@/lib/keeta/browser-signer';
 import type { TradeIntent } from '@/lib/keeta/trade-types';
 
 type ProviderConfig = {
@@ -114,7 +116,7 @@ function alertChime() {
   }
 }
 
-type View = 'chat' | 'wallet' | 'trade' | 'automations' | 'skills' | 'settings';
+type View = 'chat' | 'wallet' | 'trade' | 'launch' | 'automations' | 'skills' | 'settings';
 
 /** Small trash can used by the saved-chat list. */
 function TrashIcon({ className = 'w-3.5 h-3.5' }: { className?: string }) {
@@ -178,6 +180,7 @@ const NAV: { id: View; label: string; icon: string }[] = [
   { id: 'chat', label: 'Chat', icon: '💬' },
   { id: 'wallet', label: 'Wallet', icon: '👛' },
   { id: 'trade', label: 'Trade', icon: '⇄' },
+  { id: 'launch', label: 'Launchpad', icon: '🚀' },
   { id: 'automations', label: 'Automations', icon: '⚡' },
   { id: 'skills', label: 'Skills', icon: '📖' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
@@ -218,6 +221,8 @@ export default function Home() {
   const [seed, setSeed] = useState<string | null>(null);
   /** A prepared trade waiting for the user's confirmation before signing. */
   const [tradeIntent, setTradeIntent] = useState<TradeIntent | null>(null);
+  /** True while the confirm card is signing, so it shows "signing…". */
+  const [tradeSigning, setTradeSigning] = useState(false);
   /** The low-balance automation wallet's key, in memory, for automation actions. */
   const [automationSeed, setAutomationSeed] = useState<string | null>(null);
   /** Whether we have asked the server whether a session exists. */
@@ -614,6 +619,7 @@ export default function Home() {
     // Automation proposals are signed with the low-balance automation key
     // when there is one; anything else uses the main wallet.
     const signer = intent.fromAutomation ? automationSeed ?? seed : seed;
+    setTradeSigning(true);
     try {
       if (!signer) throw new Error('The wallet is locked — unlock it to sign.');
 
@@ -637,7 +643,50 @@ export default function Home() {
       await refresh();
     } catch (e) {
       setter({ error: (e as Error).message });
+    } finally {
+      setTradeSigning(false);
     }
+  }
+
+  /**
+   * Launchpad quick-buy: create a pending swap (USDC → token) on the server,
+   * then run the exact same prepare → confirm → sign flow as a chat trade.
+   * The buy source is always USDC (the stable the wallet actually holds); the
+   * confirm card shows the exact swap before anything is signed.
+   */
+  async function quickBuy(buy: { token: string; from: string; amount: number; usd: number }) {
+    const r = await apiFetch('/api/tokens', {
+      method: 'POST',
+      json: { action: 'quickBuy', from: buy.from, token: buy.token, amount: buy.amount.toString() },
+    });
+    const j = (await r.json()) as { tradeId?: string; error?: string };
+    if (!r.ok || !j.tradeId) {
+      setNotice(`err  ${j.error ?? 'could not start that buy'}`);
+      return;
+    }
+    // prepareTrade raises the confirm card (or the no-liquidity notice). The
+    // setter surfaces a hard prepare error as a notice — the buyer is on the
+    // Launchpad, not in a chat card.
+    void prepareTrade(j.tradeId, (res) => {
+      const o = res as { error?: string } | null;
+      if (o?.error) setNotice(`err  ${o.error}`);
+    });
+  }
+
+  /**
+   * Launchpad launch: sign and publish the CREATE_IDENTIFIER + mint from the
+   * browser (the seed stays here), then record it so "your tokens" survives a
+   * reload. Only reachable with an unlocked wallet.
+   */
+  async function launchToken(spec: LaunchSpec) {
+    if (!seed) throw new Error('The wallet is locked — unlock it to sign.');
+    const res = await signAndPublishTokenLaunch(spec, seed);
+    await apiFetch('/api/tokens', {
+      method: 'POST',
+      json: { action: 'recordLaunch', launch: { ...spec, address: res.address } },
+    }).catch(() => undefined);
+    setNotice(`ok  launched ${spec.symbol} · ${res.address.slice(0, 14)}…`);
+    await refresh();
   }
 
   /** Approve an automation proposal: prepare it, then sign it in the browser. */
@@ -811,9 +860,6 @@ export default function Home() {
             modelLabel={cfg ? cfg.model : ''}
             onSaved={handleChatSaved}
             onConfirm={prepareTrade}
-            tradeIntent={tradeIntent}
-            onSignTrade={signAndSubmitTrade}
-            onCancelTrade={() => setTradeIntent(null)}
           />
         )}
 
@@ -887,6 +933,14 @@ export default function Home() {
             </div>
             <p className="text-sm text-zinc-400">Use the chat to propose trades. Every trade requires confirmation before execution.</p>
           </div>
+        )}
+
+        {view === 'launch' && (
+          <Launchpad
+            unlocked={unlock.unlocked}
+            onQuickBuy={(buy) => void quickBuy(buy)}
+            onLaunch={(spec) => launchToken(spec)}
+          />
         )}
 
         {view === 'automations' && (
@@ -1175,6 +1229,15 @@ export default function Home() {
             <span className="block truncate">{alertBanner.text}</span>
           </span>
         </button>
+      )}
+
+      {tradeIntent && (
+        <TradeConfirm
+          intent={tradeIntent}
+          signing={tradeSigning}
+          onSign={() => void signAndSubmitTrade(() => undefined)}
+          onCancel={() => setTradeIntent(null)}
+        />
       )}
 
       <PwaRegister onInstallPrompt={setInstallEvent} />

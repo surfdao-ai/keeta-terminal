@@ -76,7 +76,7 @@ CAPABILITIES:
 - get_binding_quote — binding (signed) quote; may be unavailable
 - check_liquidity   — is a pair tradable right now (binding quote / estimate / route)
 - propose_trade     — creates a pending trade; the user confirms it in the UI
-- propose_token_launch — launches a NEW native Keeta token (symbol, name, supply, decimals); user confirms
+- propose_token_launch — launches a NEW native Keeta token (symbol, name, supply, decimals); user confirms. The 🚀 Launchpad view does the same via a form and also browses tokens — point the user there for that.
 - get_trade_history — executed/failed trades
 - get_cap_status    — spend vs daily cap
 - ks_* tools        — read-only KeeSpecs data (price, providers, tokens, skills).
