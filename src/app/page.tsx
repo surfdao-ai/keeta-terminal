@@ -12,6 +12,7 @@ import SignInGate from '@/components/SignInGate';
 import SkillsBrowser from '@/components/SkillsBrowser';
 import Positions from '@/components/Positions';
 import Launchpad from '@/components/Launchpad';
+import LiveRails from '@/components/LiveRails';
 import TradeConfirm from '@/components/TradeConfirm';
 import { readVault } from '@/lib/vault';
 import { apiFetch } from '@/lib/client/api';
@@ -743,6 +744,26 @@ export default function Home() {
   }
 
   /**
+   * Trade a live rail from the Trade view: create a pending swap for the exact
+   * quoted direction, then run the normal prepare → confirm → sign flow.
+   */
+  async function tradeRails(from: string, to: string, amount: number) {
+    const r = await apiFetch('/api/tokens', {
+      method: 'POST',
+      json: { action: 'quickBuy', from: `$${from}`, token: `$${to}`, amount: amount.toString() },
+    });
+    const j = (await r.json()) as { tradeId?: string; error?: string };
+    if (!r.ok || !j.tradeId) {
+      setNotice(`err  ${j.error ?? 'could not start that trade'}`);
+      return;
+    }
+    void prepareTrade(j.tradeId, (res) => {
+      const o = res as { error?: string } | null;
+      if (o?.error) setNotice(`err  ${o.error}`);
+    });
+  }
+
+  /**
    * Launchpad quick-buy: create a pending swap (USDC → token) on the server,
    * then run the exact same prepare → confirm → sign flow as a chat trade.
    * The buy source is always USDC (the stable the wallet actually holds); the
@@ -1001,7 +1022,8 @@ export default function Home() {
 
         {view === 'trade' && (
           <div className="flex-1 overflow-y-auto p-8 max-w-2xl mx-auto w-full">
-            <h1 className="text-2xl font-bold mb-6">Trade</h1>
+            <h1 className="text-2xl font-bold mb-4">Trade</h1>
+            <LiveRails onTrade={(from, to, amount) => void tradeRails(from, to, amount)} />
             <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5 mb-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-xs text-zinc-500 uppercase tracking-wider">Daily cap</div>

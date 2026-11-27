@@ -29,6 +29,19 @@ interface TokensPayload {
   launches: LaunchRecord[];
 }
 
+interface RailDirection {
+  from: string;
+  to: string;
+  fromAddress: string;
+  toAddress: string;
+  live: boolean;
+}
+
+interface RailsPayload {
+  asOf: string;
+  directions: RailDirection[];
+}
+
 type DiscoverTab = 'top' | 'trending';
 
 const QUICK_BUY_USD = [10, 25, 50, 100];
@@ -84,14 +97,21 @@ export default function Launchpad({ unlocked, onQuickBuy, onLaunch }: LaunchpadP
   const [discoverTab, setDiscoverTab] = useState<DiscoverTab>('top');
   const [query, setQuery] = useState('');
   const [buyingToken, setBuyingToken] = useState<string | null>(null);
+  const [rails, setRails] = useState<RailsPayload | null>(null);
 
   async function load() {
     setLoading(true);
     setLoadError('');
     try {
-      const r = await apiFetch('/api/tokens');
-      const j = (await r.json()) as Partial<TokensPayload> & { error?: string };
-      if (!r.ok) throw new Error(j.error ?? `directory unavailable (${r.status})`);
+      // Directory and live rails load together: the rails decide which
+      // stable (if any) each buy button is funded with.
+      const [tr, rr] = await Promise.all([
+        apiFetch('/api/tokens'),
+        apiFetch('/api/rails').catch(() => null),
+      ]);
+      if (rr && rr.ok) setRails((await rr.json()) as RailsPayload);
+      const j = (await tr.json()) as Partial<TokensPayload> & { error?: string };
+      if (!tr.ok) throw new Error(j.error ?? `directory unavailable (${tr.status})`);
       setData(j as TokensPayload);
     } catch (e) {
       setLoadError((e as Error).message);
@@ -130,20 +150,46 @@ export default function Launchpad({ unlocked, onQuickBuy, onLaunch }: LaunchpadP
     return rows;
   }
 
-  // Quick-buy source, per the agreed rule: USDC when the wallet holds some
-  // (the stable to buy with); otherwise KTA priced at the live feed so the
-  // $X button is still a dollar amount. If neither USDC nor a KTA price is
-  // available, fall back to USDC (the honest dollar buy — the confirm card
-  // shows the exact swap and an unfunded wallet simply won't sign).
-  const usdcBal = data?.usdcBalance != null ? Number(data.usdcBalance) : 0;
-  const ktaBal = Number(tokens.find((t) => t.code.toUpperCase() === 'KTA')?.balance ?? 0) || 0;
   const ktaPrice = data?.ktaPrice?.priceUsd ?? null;
-  const useKta = usdcBal <= 0 && ktaBal > 0 && ktaPrice != null && ktaPrice > 0;
-  const buySource = useKta ? 'KTA' : 'USDC';
+
+  // Which live direction (from the rails) funds a buy of this token, from the
+  // stables the wallet actually holds — USDC first, then the $K/$KB pegs the
+  // base anchor is quoting. Returns null when the token has no live venue:
+  // the button then says so instead of promising a swap that can't fill.
+  function liveBuySource(token: TokenRow): RailDirection | null {
+    const live = (rails?.directions ?? []).filter((d) => d.live && d.toAddress === token.token);
+    if (live.length === 0) return null;
+    const hold = (sym: string) =>
+      Number(tokens.find((t) => t.code.toUpperCase() === sym)?.balance ?? 0) || 0;
+    const byHold = new Map<string, number>();
+    const order: string[] = [];
+    for (const d of live) {
+      const sym = d.from.toUpperCase();
+      if (!byHold.has(sym)) {
+        byHold.set(sym, hold(sym));
+        order.push(sym);
+      }
+    }
+    order.sort((a, b) => (a === 'USDC' ? -1 : b === 'USDC' ? 1 : (byHold.get(b) ?? 0) - (byHold.get(a) ?? 0)));
+    for (const sym of order) {
+      const d = live.find((x) => x.from.toUpperCase() === sym);
+      if (d && (sym === 'USDC' ? true : (byHold.get(sym) ?? 0) > 0)) return d;
+    }
+    return null;
+  }
 
   function buildBuy(token: TokenRow, usd: number): QuickBuy {
-    if (useKta) {
-      const ktaAmount = ktaPrice ? usd / ktaPrice : usd;
+    const dir = liveBuySource(token);
+    // A live rail wins: buy with the stable the wallet holds (1:1 pegs, so the
+    // $X button is literally the stable amount).
+    if (dir) return { token: token.token, from: `$${dir.from}`, amount: usd, usd };
+    // No live venue for this token. KTA is still a sensible source for tokens
+    // priced against it (the feed rates it); otherwise fall back to USDC —
+    // the confirm card shows the exact swap and an unfunded wallet simply
+    // won't sign, so nothing over-promises.
+    const ktaBal = Number(tokens.find((t) => t.code.toUpperCase() === 'KTA')?.balance ?? 0) || 0;
+    if (ktaBal > 0 && ktaPrice != null && ktaPrice > 0) {
+      const ktaAmount = usd / ktaPrice;
       return { token: token.token, from: '$KTA', amount: Number(ktaAmount.toFixed(6)), usd };
     }
     return { token: token.token, from: '$USDC', amount: usd, usd };
@@ -210,7 +256,7 @@ export default function Launchpad({ unlocked, onQuickBuy, onLaunch }: LaunchpadP
             setQuery={setQuery}
             buyingToken={buyingToken}
             onBuy={quickBuy}
-            buySource={buySource}
+            getBuySource={liveBuySource}
             onRefresh={() => void load()}
           />
         )}
@@ -243,7 +289,7 @@ function Discover({
   setQuery,
   buyingToken,
   onBuy,
-  buySource,
+  getBuySource,
   onRefresh,
 }: {
   loading: boolean;
@@ -256,7 +302,7 @@ function Discover({
   setQuery: (q: string) => void;
   buyingToken: string | null;
   onBuy: (token: TokenRow, usd: number) => void;
-  buySource: string;
+  getBuySource: (token: TokenRow) => RailDirection | null;
   onRefresh: () => void;
 }) {
   return (
@@ -302,11 +348,17 @@ function Discover({
             <span>
               {rows.length} of {count} tokens · sorted by {discoverTab === 'top' ? 'supply' : 'activity (sends)'}
             </span>
-            <span>buy with {buySource}</span>
+            <span>buy with the stable you hold</span>
           </div>
           <div className="space-y-2">
             {rows.map((t) => (
-              <TokenRowCard key={t.token} t={t} busy={buyingToken === t.token} onBuy={onBuy} />
+              <TokenRowCard
+                key={t.token}
+                t={t}
+                busy={buyingToken === t.token}
+                onBuy={onBuy}
+                buySource={getBuySource(t)}
+              />
             ))}
             {rows.length === 0 && (
               <div className="font-mono text-[12px] text-zinc-600 px-1">no tokens match that filter</div>
@@ -322,10 +374,12 @@ function TokenRowCard({
   t,
   busy,
   onBuy,
+  buySource,
 }: {
   t: TokenRow;
   busy: boolean;
   onBuy: (token: TokenRow, usd: number) => void;
+  buySource: RailDirection | null;
 }) {
   return (
     <div className="bg-[#141416] border border-zinc-800 rounded-xl p-3">
@@ -361,6 +415,9 @@ function TokenRowCard({
           </button>
         ))}
         <span className="ml-auto font-mono text-[10px] text-zinc-600">buy → confirm → sign</span>
+        <span className={`font-mono text-[10px] ${buySource ? 'text-emerald-400' : 'text-zinc-600'}`}>
+          {buySource ? `live · with ${buySource.from}` : 'no live venue'}
+        </span>
       </div>
     </div>
   );

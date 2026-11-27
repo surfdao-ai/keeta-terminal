@@ -13,6 +13,7 @@ import { tokenDecimals, tokenSymbol, resolveTokenAddress } from './currencies';
 import { loadPending, isExpired, appendTrade, removePending, reserveCap, type PendingTrade } from '../agent/safety';
 import { ephemeralAccount } from './ephemeral';
 import { probePairLiquidity } from './liquidity';
+import { cachedLiveRails, livePegLine } from './live-rails';
 import { pickBestQuoteIndex } from './quote-routing';
 import { routeKind, routeLabel } from './routes';
 import { runPreflight } from './preflight';
@@ -147,8 +148,16 @@ export async function buildSwapIntent(
       estDisplay !== null
         ? ` · est ${pending.amount} ${fromSymbol} ≈ ${estDisplay} ${toSymbol}`
         : '';
+    // Point at what IS tradeable, from the (cache-only) rails — no extra
+    // network I/O on this path. Only name it when the attempted pair really is
+    // off-rails, so a genuinely-quiet live pair doesn't get a confusing hint.
+    const rails = cachedLiveRails();
+    const live = rails?.directions.filter((d) => d.live) ?? [];
+    const attempted = `${fromSymbol}>${toSymbol}`.toUpperCase();
+    const offRails = live.length > 0 && !live.some((d) => `${d.from}>${d.to}`.toUpperCase() === attempted);
+    const pegs = offRails && live.length ? ` Tradeable now: ${livePegLine(rails!)}.` : '';
     throw new NoLiquidityError(
-      `No live liquidity for ${fromSymbol}→${toSymbol} right now${what} (not executable — try later).`,
+      `No live liquidity for ${fromSymbol}→${toSymbol} right now${what} (not executable — try later).${pegs}`,
       usd,
     );
   }

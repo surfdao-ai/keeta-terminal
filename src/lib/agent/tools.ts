@@ -6,6 +6,7 @@ import { computePositions } from '../keeta/positions';
 import { ephemeralAccount } from '../keeta/ephemeral';
 import { tokenDecimals } from '../keeta/currencies';
 import { routeKind, routeLabel } from '../keeta/routes';
+import { getLiveRails, livePegLine } from '../keeta/live-rails';
 import { newPendingTrade, savePending, listTrades, capSpent, dailyCapUsd } from './safety';
 import { validateTokenSpec } from '../keeta/tokens';
 import {
@@ -214,6 +215,33 @@ export function buildTools(ctx: ToolContext) {
             : estimate
               ? `No live liquidity for this pair right now. Estimate: ${toDisplay(estimate.estimate?.convertedAmount ?? 0n, toDecimals)} — not executable yet, try again later. Do not propose a trade that cannot fill.`
               : 'No provider is issuing a binding quote for this pair right now, and no estimate is available. Do not propose a trade that cannot fill.',
+        };
+      },
+    }),
+
+    get_live_rails: tool({
+      description:
+        'Which Keeta pairs can actually be traded RIGHT NOW (a provider is issuing a binding quote). Keeta has no DEX; the only live venue is the base anchor, which quotes same-currency $K/$KB stable pegs (e.g. KBUSD→KUSD at ~1:1). Call this before proposing a trade, or when the user asks "what can I trade?". Pairs NOT in this list are not executable — do not propose them.',
+      inputSchema: z.object({}),
+      execute: async () => {
+        const rails = await getLiveRails();
+        const live = rails.directions.filter((d) => d.live);
+        return {
+          asOf: rails.asOf,
+          provider: rails.provider,
+          liveCount: live.length,
+          // A human one-liner: the pegs that trade right now.
+          pegs: livePegLine(rails),
+          directions: rails.directions.map((d) => ({
+            from: d.from,
+            to: d.to,
+            live: d.live,
+            rate: d.rate,
+            fee: d.fee,
+          })),
+          note: live.length
+            ? `Only these ${live.length} direction(s) have a live binding quote. Everything else (KTA, USDC, community tokens) has no executable venue right now — say so instead of proposing a trade that cannot fill.`
+            : 'No pair has a live binding quote right now. Nothing is executable — say so plainly.',
         };
       },
     }),
