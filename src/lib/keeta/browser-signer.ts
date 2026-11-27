@@ -160,7 +160,13 @@ export async function signAndPublishTokenLaunch(
         new TextEncoder().encode(JSON.stringify({ decimalPlaces: spec.decimals })),
       ),
       defaultPermission: new KeetaNet.lib.Permissions(['ACCESS'], []),
-    } as never);
+    } as never,
+    // The builder's default account is the creator (a key-pair account), not
+    // the token. Without this, SET_INFO targets the creator and the block
+    // fails validation: "Non-Identifier accounts cannot have default
+    // permissions". (tokens.ts does the same for the server-side launch.)
+    { account: token.account },
+    );
 
     const blocks = await builder.computeBlocks();
     const signed = blocks.blocks[blocks.blocks.length - 1];
