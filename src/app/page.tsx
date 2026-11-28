@@ -26,6 +26,7 @@ import {
   type LaunchSpec,
   type TokenAdminOp,
 } from '@/lib/keeta/browser-signer';
+import { unlockWallet, signInWithWallet } from '@/lib/client/signin';
 import { capAlertDecision } from '@/lib/cap-alert';
 import type { TradeIntent } from '@/lib/keeta/trade-types';
 
@@ -220,7 +221,7 @@ export default function Home() {
   const [navOpen, setNavOpen] = useState(false);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
 
-  const [unlock, setUnlock] = useState({ hasWallet: false, address: null as string | null, unlocked: false });
+  const [unlock, setUnlock] = useState({ hasWallet: false, address: null as string | null });
   /** The signed-in wallet address (null = not signed in). */
   const [session, setSession] = useState<string | null>(null);
   /**
@@ -228,6 +229,19 @@ export default function Home() {
    * sent to the server — it is used here to sign.
    */
   const [seed, setSeed] = useState<string | null>(null);
+  /** Truthful client-side unlock state: true only while the seed is in memory.
+   * The server cannot know whether this browser holds the seed, so it must
+   * never drive the "wallet unlocked" flag. */
+  const walletUnlocked = Boolean(seed);
+  const vault = readVault();
+  /** Set while a background unlock (passkey Face ID / Touch ID) is in flight. */
+  const [restoring, setRestoring] = useState(false);
+  /** Show the inline unlock prompt when signed in (session cookie) but the
+   * seed is not in memory and a vault exists on this device. */
+  const showUnlock = session != null && !seed && !restoring && Boolean(vault);
+  /** Passphrase typed into the unlock prompt (passkey vaults don't need one). */
+  const [unlockPassphrase, setUnlockPassphrase] = useState('');
+  const [unlockError, setUnlockError] = useState('');
   /** A prepared trade waiting for the user's confirmation before signing. */
   const [tradeIntent, setTradeIntent] = useState<TradeIntent | null>(null);
   /** True while the confirm card is signing, so it shows "signing…". */
@@ -279,14 +293,86 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
+  /**
+   * Complete an unlock: prove control to the server (refresh the session if
+   * needed), hold the seed in memory, and mark the wallet unlocked.
+   */
+  async function finishUnlock(opened: {
+    seed: string;
+    address: string;
+    automation?: { seed: string; address: string };
+  }) {
+    setUnlockError('');
+    setRestoring(false);
+    const signedInAs = await signInWithWallet(opened.seed, opened.address);
+    setSession(signedInAs);
+    setSeed(opened.seed);
+    setAutomationSeed(opened.automation?.seed ?? null);
+    setUnlock({ address: opened.address, hasWallet: true });
+    void refresh();
+  }
+
+  /** Unlock the device vault (passkey → Face ID/Touch ID; passphrase → typed). */
+  async function doUnlock() {
+    setRestoring(true);
+    setUnlockError('');
+    try {
+      const opened = await unlockWallet(unlockPassphrase || undefined);
+      await finishUnlock(opened);
+    } catch (e) {
+      setUnlockError((e as Error).message);
+    } finally {
+      setRestoring(false);
+    }
+  }
 
   const refresh = useCallback(async () => {
     const r = await apiFetch('/api/state');
     if (!r.ok) return;
     const j = await r.json();
-    setUnlock({ hasWallet: j.hasWallet, address: j.address, unlocked: Boolean(j.unlocked) });
+    // `unlocked` stays client-side (Boolean(seed)); the server's value is
+    // meaningless here and must not flip "wallet locked" back to "unlocked."
+    setUnlock((u) => ({ ...u, hasWallet: j.hasWallet, address: j.address }));
     setState(j);
   }, []);
+
+  /**
+   * Restore the wallet unlock after a reload: the session cookie may have
+   * survived, but the seed lives in memory only. When a vault exists on this
+   * device, unlock it — a passkey vault prompts Face ID / Touch ID (no typing),
+   * a passphrase vault shows the unlock prompt below.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!session || seed) return;
+      const rec = readVault();
+      if (!rec) return;
+      setRestoring(true);
+      try {
+        if (rec.mode === 'passkey') {
+          // Face ID / Touch ID prompt — no typing needed.
+          const opened = await unlockWallet();
+          const signedInAs = await signInWithWallet(opened.seed, opened.address);
+          setSession(signedInAs);
+          setSeed(opened.seed);
+          setAutomationSeed(opened.automation?.seed ?? null);
+          setUnlock({ address: opened.address, hasWallet: true });
+          void refresh();
+        }
+        // Passphrase vault: the user must type the passphrase — the unlock
+        // prompt below shows automatically once restoring finishes.
+      } catch (e) {
+        setUnlockError((e as Error).message);
+      } finally {
+        if (!cancelled) setRestoring(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, seed, refresh]);
+
 
   async function loadChats() {
     const r = await apiFetch('/api/chats');
@@ -439,20 +525,20 @@ export default function Home() {
 
   // While the app is open, evaluate automations more often than the 15m schedule.
   useEffect(() => {
-    if (!unlock.unlocked) return;
+    if (!walletUnlocked) return;
     const tick = () => {
       apiFetch('/api/automations/run', { method: 'POST' }).catch(() => undefined);
     };
     const t = setInterval(tick, 60_000);
     return () => clearInterval(t);
-  }, [unlock.unlocked, seed]);
+  }, [walletUnlocked, seed]);
 
   // Surface a fired price alert in the main view — the only feedback the user
   // otherwise gets is an amber line inside the Automations tab, which a closed
   // or backgrounded app never shows. Poll the activity log for *new* triggered
   // alerts (newer than the watermark) and raise a banner + chime.
   useEffect(() => {
-    if (!unlock.unlocked) return;
+    if (!walletUnlocked) return;
     let cancelled = false;
     const checkAlerts = async () => {
       try {
@@ -476,7 +562,7 @@ export default function Home() {
       cancelled = true;
       clearInterval(t);
     };
-  }, [unlock.unlocked]);
+  }, [walletUnlocked]);
 
   useEffect(() => {
     if (!notice) return;
@@ -854,10 +940,78 @@ export default function Home() {
           setSession(address);
           setSeed(unlockedSeed);
           setAutomationSeed(unlockedAutomationSeed ?? null);
+          setUnlock({ address, hasWallet: true });
           setSessionChecked(true);
           void refresh();
         }}
       />
+    );
+  }
+
+  // Signed in but the seed is not in memory (post-reload): unlock from the
+  // device vault before anything can be signed.
+  if (showUnlock) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="bg-[#141416] border border-zinc-700 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+          <div className="text-lg font-bold mb-2">Unlock your wallet</div>
+          <p className="text-[12px] text-zinc-400 mb-4">
+            Your session is still active, but the wallet key is not in memory
+            after the reload. Unlock to sign trades.
+          </p>
+          {vault?.mode === 'passkey' ? (
+            <button
+              onClick={doUnlock}
+              disabled={restoring}
+              className="w-full px-3 py-2.5 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-50 text-sm font-medium text-white"
+            >
+              {restoring ? '…' : 'Unlock with your passkey'}
+            </button>
+          ) : (
+            <>
+              <input
+                type="password"
+                value={unlockPassphrase}
+                onChange={(e) => setUnlockPassphrase(e.target.value)}
+                placeholder="vault passphrase"
+                autoComplete="current-password"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void doUnlock();
+                }}
+                className="w-full px-3 py-2.5 rounded-lg bg-[#09090B] border-zinc-700 text-sm focus:outline-none focus:border-purple-600 mb-2"
+              />
+              <button
+                onClick={doUnlock}
+                disabled={restoring || !unlockPassphrase}
+                className="w-full px-3 py-2.5 rounded-lg bg-[#4C1D95] hover:bg-purple-700 disabled:opacity-50 text-sm font-medium text-white"
+              >
+                {restoring ? '…' : 'Unlock and sign in'}
+              </button>
+            </>
+          )}
+          {unlockError && (
+            <p className="text-[11px] text-red-400 font-mono mt-3">{unlockError}</p>
+          )}
+          <div className="mt-4 flex gap-2">
+            <button
+              onClick={() => {
+                setSession(null);
+                setSeed(null);
+                setSessionChecked(true);
+              }}
+              className="text-[12px] text-zinc-500 hover:text-zinc-300"
+            >
+              Sign out →
+            </button>
+            <button
+              onClick={() => setUnlockError('')}
+              className="text-[12px] text-zinc-500 hover:text-zinc-300"
+            >
+              Later
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -874,7 +1028,7 @@ export default function Home() {
         </button>
         <span className="font-mono text-[14px] font-semibold text-zinc-100">kterminal</span>
         <span className="ml-auto font-mono text-[11px] text-zinc-400 truncate max-w-[45%]">
-          {unlock.unlocked ? 'wallet unlocked' : 'wallet locked'}
+          {walletUnlocked ? 'wallet unlocked' : 'wallet locked'}
         </span>
       </div>
 
@@ -988,7 +1142,7 @@ export default function Home() {
             initialMessages={activeMessages}
             providerConfig={cfg}
             cap={cap ?? null}
-            unlocked={unlock.unlocked}
+            unlocked={walletUnlocked}
             address={unlock.address}
             modelLabel={cfg ? cfg.model : ''}
             onSaved={handleChatSaved}
@@ -1010,13 +1164,13 @@ export default function Home() {
                 setSessionChecked(true);
               }}
             />
-            {unlock.unlocked && (
+            {walletUnlocked && (
               <div className="mt-4">
                 <Positions />
               </div>
             )}
 
-            {unlock.unlocked && (
+            {walletUnlocked && (
               <div className="bg-[#141416] border border-zinc-800 rounded-2xl p-5 mt-4">
                 <div className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Balances</div>
                 {state?.balances?.length ? (
@@ -1072,7 +1226,7 @@ export default function Home() {
 
         {view === 'launch' && (
           <Launchpad
-            unlocked={unlock.unlocked}
+            unlocked={walletUnlocked}
             holder={unlock.address}
             onQuickBuy={(buy) => void quickBuy(buy)}
             onLaunch={(spec) => launchToken(spec)}
@@ -1088,7 +1242,7 @@ export default function Home() {
               (every 15m) and while the app is open.
             </p>
             <Automations
-              unlocked={unlock.unlocked}
+              unlocked={walletUnlocked}
               onNotice={(m) => setNotice(m)}
               onSignProposal={signAutomationProposal}
               onAutomationWallet={(automationWalletSeed) => setAutomationSeed(automationWalletSeed)}
