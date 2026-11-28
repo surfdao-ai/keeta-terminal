@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/client/api';
+import TokenDetail from '@/components/TokenDetail';
 import type { LaunchRecord } from '@/lib/keeta/trade-types';
 
 /** One token in the KeeSpecs directory, enriched with the wallet's balance. */
@@ -79,8 +80,11 @@ interface QuickBuy {
 
 interface LaunchpadProps {
   unlocked: boolean;
+  /** The signed-in wallet's address (for the token-detail holder reads). */
+  holder: string | null;
   onQuickBuy: (buy: QuickBuy) => void;
   onLaunch: (spec: LaunchSpec) => Promise<void>;
+  onManage: (op: import('@/lib/keeta/browser-signer').TokenAdminOp) => Promise<void>;
 }
 
 /**
@@ -89,7 +93,7 @@ interface LaunchpadProps {
  * through the normal propose → confirm → sign flow, so the daily cap still
  * applies and nothing signs without an explicit approval.
  */
-export default function Launchpad({ unlocked, onQuickBuy, onLaunch }: LaunchpadProps) {
+export default function Launchpad({ unlocked, holder, onQuickBuy, onLaunch, onManage }: LaunchpadProps) {
   const [tab, setTab] = useState<'discover' | 'launch'>('discover');
   const [data, setData] = useState<TokensPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,6 +102,9 @@ export default function Launchpad({ unlocked, onQuickBuy, onLaunch }: LaunchpadP
   const [query, setQuery] = useState('');
   const [buyingToken, setBuyingToken] = useState<string | null>(null);
   const [rails, setRails] = useState<RailsPayload | null>(null);
+  // When set, the view shows the full detail/management page for this token
+  // instead of the Discover/Launch tabs.
+  const [detailAddress, setDetailAddress] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -204,6 +211,23 @@ export default function Launchpad({ unlocked, onQuickBuy, onLaunch }: LaunchpadP
     }
   }
 
+  // A single token's full detail + management page replaces the tabs.
+  if (detailAddress) {
+    return (
+      <div className="flex-1 overflow-y-auto p-4 sm:p-8 w-full">
+        <div className="max-w-3xl mx-auto">
+          <TokenDetail
+            address={detailAddress}
+            holder={holder}
+            unlocked={unlocked}
+            onManage={onManage}
+            onBack={() => setDetailAddress(null)}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-y-auto p-4 sm:p-8 w-full">
       <div className="max-w-3xl mx-auto">
@@ -269,6 +293,7 @@ export default function Launchpad({ unlocked, onQuickBuy, onLaunch }: LaunchpadP
             listedTokens={tokens}
             onLaunch={onLaunch}
             onRefresh={() => void load()}
+            onOpenDetail={(address) => setDetailAddress(address)}
           />
         )}
       </div>
@@ -432,6 +457,7 @@ function Launch({
   listedTokens,
   onLaunch,
   onRefresh,
+  onOpenDetail,
 }: {
   unlocked: boolean;
   ktaBalance: string | null;
@@ -439,6 +465,7 @@ function Launch({
   listedTokens: TokenRow[];
   onLaunch: (spec: LaunchSpec) => Promise<void>;
   onRefresh: () => void;
+  onOpenDetail: (address: string) => void;
 }) {
   const listed = new Set(listedTokens.map((t) => t.token));
   const [symbol, setSymbol] = useState('');
@@ -572,8 +599,9 @@ function Launch({
           {launching ? 'launching…' : 'launch token'}
         </button>
         <p className="text-[11px] text-zinc-600 mt-2">
-          Minted to your wallet on the Keeta ledger. It is tradeable once an FX anchor provider
-          quotes it — until then it shows as “not quoted yet”.
+          Your wallet becomes the token’s owner. The supply lives in the token’s own treasury
+          (see “your tokens” → manage) until you send it out. It is tradeable once an FX anchor
+          provider quotes it.
         </p>
       </div>
 
@@ -586,28 +614,45 @@ function Launch({
         {launches.length > 0 && (
           <div className="space-y-2">
             {launches.map((l) => (
-              <div key={l.address} className="bg-[#141416] border border-zinc-800 rounded-xl p-3">
-                <div className="flex items-baseline gap-2">
-                  <span className="font-mono text-[14px] text-zinc-100">{l.symbol}</span>
-                  <span className="text-[12px] text-zinc-500 truncate">{l.name}</span>
-                  <span className="ml-auto shrink-0 font-mono text-[10px] text-zinc-600">
-                    {new Date(l.at).toLocaleDateString()}
-                  </span>
-                </div>
-                <div className="font-mono text-[11px] text-zinc-600 truncate" title={l.address}>
-                  {shortAddr(l.address)} · supply {fmtSupply(l.supply)} · {l.decimals} dp
-                </div>
-                <div className="mt-2">
-                  {listed.has(l.address) ? (
-                    <span className="inline-block px-2 py-0.5 rounded-md bg-emerald-900/30 border border-emerald-800/50 font-mono text-[10px] text-emerald-300">
-                      live in the directory
+              <div
+                key={l.address}
+                className="bg-[#141416] border border-zinc-800 rounded-xl p-3 hover:border-zinc-700 transition"
+              >
+                <button
+                  onClick={() => onOpenDetail(l.address)}
+                  className="w-full text-left group"
+                  title="open full details"
+                >
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-mono text-[14px] text-zinc-100 group-hover:text-purple-200">
+                      {l.symbol}
                     </span>
-                  ) : (
-                    <span className="inline-block px-2 py-0.5 rounded-md bg-amber-900/30 border border-amber-800/50 font-mono text-[10px] text-amber-300">
-                      not quoted by a provider yet
+                    <span className="text-[12px] text-zinc-500 truncate">{l.name}</span>
+                    <span className="ml-auto shrink-0 font-mono text-[10px] text-zinc-600">
+                      {new Date(l.at).toLocaleDateString()}
                     </span>
-                  )}
-                </div>
+                  </div>
+                  <div className="font-mono text-[11px] text-zinc-500 break-all mt-1">
+                    {l.address}
+                  </div>
+                  <div className="font-mono text-[11px] text-zinc-600 mt-1">
+                    supply {fmtSupply(l.supply)} · {l.decimals} dp
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    {listed.has(l.address) ? (
+                      <span className="inline-block px-2 py-0.5 rounded-md bg-emerald-900/30 border border-emerald-800/50 font-mono text-[10px] text-emerald-300">
+                        live in the directory
+                      </span>
+                    ) : (
+                      <span className="inline-block px-2 py-0.5 rounded-md bg-amber-900/30 border border-amber-800/50 font-mono text-[10px] text-amber-300">
+                        not quoted by a provider yet
+                      </span>
+                    )}
+                    <span className="ml-auto font-mono text-[11px] text-purple-300 group-hover:text-purple-200">
+                      manage →
+                    </span>
+                  </div>
+                </button>
               </div>
             ))}
           </div>

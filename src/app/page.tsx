@@ -18,7 +18,14 @@ import { readVault } from '@/lib/vault';
 import { apiFetch } from '@/lib/client/api';
 import type { ScanResult } from '@/lib/providers/scan';
 import { latestNewAlert, type AlertLogEntry } from '@/lib/agent/alerts';
-import { signSwapBlock, signAndPublishTokenLaunch, signPaymentBlock, type LaunchSpec } from '@/lib/keeta/browser-signer';
+import {
+  signSwapBlock,
+  signAndPublishTokenLaunch,
+  signPaymentBlock,
+  signAndPublishTokenAdmin,
+  type LaunchSpec,
+  type TokenAdminOp,
+} from '@/lib/keeta/browser-signer';
 import { capAlertDecision } from '@/lib/cap-alert';
 import type { TradeIntent } from '@/lib/keeta/trade-types';
 
@@ -804,6 +811,17 @@ export default function Home() {
     await refresh();
   }
 
+  /**
+   * Administer a token (mint / burn / send / update info / grant-revoke):
+   * the block is built and signed from the browser as the token's owner, then
+   * published. The seed stays here.
+   */
+  async function manageToken(op: TokenAdminOp) {
+    if (!seed) throw new Error('The wallet is locked — unlock it to sign.');
+    await signAndPublishTokenAdmin(op, seed);
+    await refresh();
+  }
+
   /** Approve an automation proposal: prepare it, then sign it in the browser. */
   async function signAutomationProposal(tradeId: string) {
     const r = await apiFetch('/api/trades/prepare', { method: 'POST', json: { tradeId } });
@@ -1055,8 +1073,10 @@ export default function Home() {
         {view === 'launch' && (
           <Launchpad
             unlocked={unlock.unlocked}
+            holder={unlock.address}
             onQuickBuy={(buy) => void quickBuy(buy)}
             onLaunch={(spec) => launchToken(spec)}
+            onManage={(op) => manageToken(op)}
           />
         )}
 

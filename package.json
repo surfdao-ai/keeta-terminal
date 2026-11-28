@@ -25,7 +25,8 @@
     "test:datacap": "tsx scripts/test-datacap.mts",
     "test:data-pay": "tsx scripts/data-pay-e2e.mjs",
     "test:rails": "tsx scripts/rails-check.mts",
-    "test:launch": "tsx scripts/launch-probe.mts"
+    "test:launch": "tsx scripts/launch-probe.mts",
+    "test:detail": "tsx scripts/test-token-detail.mts"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.143",

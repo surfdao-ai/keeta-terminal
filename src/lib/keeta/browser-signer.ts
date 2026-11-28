@@ -115,6 +115,130 @@ export async function signPaymentBlock(
   }
 }
 
+/** Display amount → raw integer (decimals applied). No server module needed. */
+function displayToRaw(display: string, decimals: number): bigint {
+  const clean = display.replace(/[,_\s]/g, '');
+  if (!/^\d+(\.\d+)?$/.test(clean)) throw new Error(`Invalid amount: ${display}`);
+  const [whole, frac = ''] = clean.split('.');
+  const fracPadded = frac.padEnd(decimals, '0').slice(0, decimals);
+  return BigInt(whole || '0') * 10n ** BigInt(decimals) + BigInt(fracPadded || '0');
+}
+
+export interface TokenAdminOp {
+  /** The token address being administered (the block account). */
+  token: string;
+  decimals: number;
+  kind: 'mint' | 'burn' | 'updateInfo' | 'send' | 'grant';
+  /** mint/burn/send: display amount. */
+  amount?: string;
+  /** send: the recipient address. */
+  to?: string;
+  /** updateInfo: the full new info (SET_INFO overwrites, so all fields). */
+  name?: string;
+  description?: string;
+  metadata?: string;
+  /** updateInfo: the token's current default permission flags (preserved). */
+  defaultFlags?: string[];
+  /** grant: the account to grant/revoke, the flags, and the method. */
+  principal?: string;
+  flags?: string[];
+  method?: 'set' | 'add' | 'remove';
+}
+
+/**
+ * Build, sign and publish a token-administration block from the browser.
+ *
+ * The block lives on the *token* account (not the wallet), so the creator's
+ * key signs it as the token's owner/admin. Authorization against the ACL is
+ * enforced by the network at publish — this only assembles and signs. The seed
+ * stays in the browser; the signed block is what goes out.
+ */
+export async function signAndPublishTokenAdmin(
+  op: TokenAdminOp,
+  seed: string,
+): Promise<{ block: string }> {
+  const account = accountFromSeed(seed);
+  const client = KeetaNet.UserClient.fromNetwork('main', account);
+  try {
+    const token = publicAccount(op.token);
+    if (!token.isToken()) {
+      throw new Error('That address is not a token account.');
+    }
+    const builder = client.initBuilder();
+
+    switch (op.kind) {
+      case 'mint': {
+        builder.modifyTokenSupply(displayToRaw(op.amount ?? '0', op.decimals), {
+          account: token,
+        });
+        break;
+      }
+      case 'burn': {
+        builder.modifyTokenSupply(-displayToRaw(op.amount ?? '0', op.decimals), {
+          account: token,
+        });
+        break;
+      }
+      case 'send': {
+        if (!op.to) throw new Error('A recipient address is required.');
+        builder.send(
+          publicAccount(op.to),
+          displayToRaw(op.amount ?? '0', op.decimals),
+          token,
+          undefined,
+          { account: token },
+        );
+        break;
+      }
+      case 'updateInfo': {
+        // SET_INFO on an identifier must carry a default permission, so the
+        // current one is preserved (defaultFlags) rather than dropped.
+        const flags = op.defaultFlags?.length ? op.defaultFlags : ['ACCESS'];
+        builder.setInfo(
+          {
+            name: op.name ?? '',
+            description: op.description ?? '',
+            metadata:
+              op.metadata ??
+              toBase64(new TextEncoder().encode(JSON.stringify({ decimalPlaces: op.decimals }))),
+            defaultPermission: new KeetaNet.lib.Permissions(flags as never, []),
+          } as never,
+          { account: token },
+        );
+        break;
+      }
+      case 'grant': {
+        if (!op.principal) throw new Error('A principal address is required.');
+        const method =
+          op.method === 'add'
+            ? KeetaNet.lib.Block.AdjustMethod.ADD
+            : op.method === 'remove'
+              ? KeetaNet.lib.Block.AdjustMethod.SUBTRACT
+              : KeetaNet.lib.Block.AdjustMethod.SET;
+        builder.updatePermissions(
+          publicAccount(op.principal),
+          new KeetaNet.lib.Permissions((op.flags?.length ? op.flags : ['ADMIN']) as never, []),
+          token,
+          method,
+          { account: token },
+        );
+        break;
+      }
+      default:
+        throw new Error('Unknown token operation.');
+    }
+
+    const { blocks } = await builder.computeBlocks();
+    if (blocks.length !== 1 || !blocks[0].account.comparePublicKey(token)) {
+      throw new Error('The operation did not produce a single block on the token account.');
+    }
+    await client.transmit(blocks);
+    return { block: toBase64(new Uint8Array(blocks[0].toBytes())) };
+  } finally {
+    await client.destroy().catch(() => undefined);
+  }
+}
+
 export interface LaunchSpec {
   name: string;
   symbol: string;
