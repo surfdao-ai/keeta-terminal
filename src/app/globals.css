@@ -51,3 +51,15 @@ html {
   /* Keyboard inset, kept in sync by <ViewportLock />. */
   --kb: 0px;
 }
+
+/*
+ * iOS Safari zooms into any <input>/<select>/<textarea> with font-size < 16px.
+ * Forcing 16px on all form controls stops the zoom while keeping the controls
+ * usable. The composer in ChatPanel (text-[15px]) and the Launchpad/TokenDetail
+ * inputs (text-[12px]/text-[13px]) would otherwise all trigger it.
+ */
+input,
+select,
+textarea {
+  font-size: 16px !important;
+}

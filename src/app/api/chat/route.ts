@@ -13,6 +13,7 @@ import { buildTools } from '@/lib/agent/tools';
 import { guardWrite } from '@/lib/auth/guard';
 import { buildModel } from '@/lib/llm';
 import type { ProviderConfig } from '@/lib/llm';
+import { KTERMINAL_DOCS } from '@/lib/agent/docs-content';
 
 // Reasoning models can take a while before the first token; give the stream
 // room to finish instead of cutting it off mid-answer.
@@ -91,6 +92,7 @@ CAPABILITIES:
 - get_live_rails    — which pairs are ACTUALLY tradeable right now (live binding quote). Check this before proposing a trade.
 - propose_trade     — creates a pending trade; the user confirms it in the UI
 - propose_token_launch — launches a NEW native Keeta token (symbol, name, supply, decimals); user confirms. The 🚀 Launchpad view does the same via a form and also browses tokens — point the user there for that.
+- read_docs         — Kterminal feature docs: how to swap, launch/manage tokens (mint/burn/send/update info/grant admin), automations (alert/recurring/liquidity), watchlist, daily cap, models/PWA/troubleshooting. Use when the user asks "how do I..." about the terminal itself.
 - get_trade_history — executed/failed trades
 - get_cap_status    — spend vs daily cap (includes the data-read cap)
  - propose_data_payment — pay 0.01-0.02 USDC for a paid KeeSpecs read; user confirms in the UI
@@ -126,7 +128,10 @@ SAFETY RULES (non-negotiable):
    visitor signed in with a wallet; you never need their key.
 7. Trades are proposals: the browser signs them after the user confirms. Say
    "proposed" until the user confirms, and never claim a trade executed.
-8. Token launches are native to Keeta (no contract). Initial supply is minted to the creator and needs KTA for fees.`;
+8. Token launches are native to Keeta (no contract). Initial supply is minted to the creator and needs KTA for fees.
+
+KTERMINAL DOCS REFERENCE (answer "how do I" questions about the terminal from this):
+${KTERMINAL_DOCS}`;
 
 export async function POST(req: Request) {
   // The visitor must be signed in (they proved control of a wallet), and the

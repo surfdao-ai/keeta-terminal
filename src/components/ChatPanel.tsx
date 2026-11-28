@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import ToolCard from '@/components/ToolCard';
+import TokenTicker from '@/components/TokenTicker';
 import { apiFetch, csrfHeader } from '@/lib/client/api';
 
 export interface PanelProviderConfig {
@@ -222,6 +223,9 @@ export default function ChatPanel({
           </div>
         )}
       </div>
+
+      {/* horizontal ticker of new token launches, between bubbles and composer */}
+      <TokenTicker />
 
       <div className="border-t border-zinc-800/80 p-3 sm:p-4 bg-[#09090B] pb-[calc(0.75rem+env(safe-area-inset-bottom,0px)+var(--kb,0px))] sm:pb-[calc(1rem+env(safe-area-inset-bottom,0px)+var(--kb,0px))]">
         <div className="max-w-5xl mx-auto">

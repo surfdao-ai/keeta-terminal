@@ -9,6 +9,7 @@ import { routeKind, routeLabel } from '../keeta/routes';
 import { getLiveRails, livePegLine } from '../keeta/live-rails';
 import { newPendingTrade, savePending, listTrades, capSpent, dailyCapUsd } from './safety';
 import { validateTokenSpec } from '../keeta/tokens';
+import { readDocs } from './docs-content';
 import {
   saveDataPayment,
   validateRequirement,
@@ -358,6 +359,13 @@ export function buildTools(ctx: ToolContext) {
           dataCap: data,
         };
       },
+    }),
+
+    read_docs: tool({
+      description:
+        'Look up Kterminal feature documentation — how to swap, launch a token, manage a token (mint/burn/send/update info/grant admin), set up automations (alert/recurring/liquidity), use the watchlist, set the daily cap, use models/PWA/troubleshooting. Pass the user\'s question as the query.',
+      inputSchema: z.object({ query: z.string().describe('The user\'s question about Kterminal features.') }),
+      execute: async ({ query }) => ({ answer: readDocs(query) }),
     }),
 
     propose_data_payment: tool({
