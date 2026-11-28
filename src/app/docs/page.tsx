@@ -471,7 +471,7 @@ interface DocBlock {
 export default function DocsPage() {
   return (
     <div className="h-full overflow-y-auto bg-[#09090B] text-[#F7F7F7]">
-      <div className="max-w-3xl mx-auto px-5 py-10 pb-20">
+      <div className="max-w-3xl mx-auto px-5 pt-[max(env(safe-area-inset-top,0px),3rem)] pb-20">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-600 to-indigo-800 flex items-center justify-center font-bold text-white text-sm">
             K
